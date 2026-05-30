@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   Bell, Home, Sparkles, Users, Receipt, ClipboardCheck,
-  FileText, Settings, Moon, Sun, LogOut, Search, PiggyBank, Wrench,
+  FileText, Settings, Moon, Sun, LogOut, PiggyBank, Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clearLocalUser, getLocalUser, type LocalUser } from "@/lib/api-key";
@@ -135,16 +135,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="flex-1 min-w-0 flex flex-col">
         <header className="sticky top-0 z-10 backdrop-blur bg-background/70 border-b border-border px-6 py-3 flex items-center gap-3">
           <div className="md:hidden font-bold"><span className="text-foreground">Prompt</span><span className="text-primary">Ledger</span></div>
-          <div className="flex-1 max-w-xl ml-auto md:ml-0 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <input
-              placeholder="Search anything…"
-              className="w-full pl-9 pr-16 h-9 rounded-lg bg-input/60 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-            <kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground border border-border rounded px-1.5 py-0.5">
-              ⌘ K
-            </kbd>
-          </div>
+          <div className="flex-1" />
           <button
             className="relative size-9 rounded-full bg-secondary grid place-items-center hover:bg-accent transition"
             title="Notifications"

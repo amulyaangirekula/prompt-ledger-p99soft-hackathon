@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import {
   Filter, Calendar, Plus, Search, MoreVertical,
   TrendingUp, TrendingDown, Receipt, BarChart2,
-  ChevronLeft, ChevronRight, X, Check, LayoutGrid,
+  ChevronLeft, ChevronRight, X, Check,
 } from "lucide-react";
 
 export const Route = createFileRoute("/expenses")({
@@ -151,12 +151,14 @@ function ExpensesPage() {
   const [localUser, setLocalUser] = useState<LocalUser | null>(null);
   const [apiKey, setApiKey] = useState("");
   const today = new Date();
-  const [monthStart] = useState(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10));
-  const [monthEnd] = useState(new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10));
-  const [tab, setTab] = useState<"all" | "my" | "group">("all");
+  const [dateStart, setDateStart] = useState(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10));
+  const [dateEnd, setDateEnd] = useState(new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10));
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
+  const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [showFilter, setShowFilter] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -170,9 +172,9 @@ function ExpensesPage() {
   // Personal expenses
   const personalQ = useQuery({
     enabled: !!apiKey,
-    queryKey: ["expenses", monthStart, monthEnd, apiKey],
+    queryKey: ["expenses", dateStart, dateEnd, apiKey],
     queryFn: async () => {
-      const r = await callTool({ data: { apiKey, name: "list_expenses", args: { start_date: monthStart, end_date: monthEnd } } });
+      const r = await callTool({ data: { apiKey, name: "list_expenses", args: { start_date: dateStart, end_date: dateEnd } } });
       const data = r.ok ? r.data : null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return (Array.isArray(data) ? data : (data as any)?.expenses ?? []) as any[];
@@ -182,9 +184,9 @@ function ExpensesPage() {
   // Summary for KPIs
   const summaryQ = useQuery({
     enabled: !!apiKey,
-    queryKey: ["summary", monthStart, monthEnd, apiKey],
+    queryKey: ["summary", dateStart, dateEnd, apiKey],
     queryFn: async () => {
-      const r = await callTool({ data: { apiKey, name: "summarize", args: { start_date: monthStart, end_date: monthEnd } } });
+      const r = await callTool({ data: { apiKey, name: "summarize", args: { start_date: dateStart, end_date: dateEnd } } });
       if (!r.ok) return null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const arr: any[] = Array.isArray(r.data) ? r.data : [];
@@ -194,17 +196,7 @@ function ExpensesPage() {
     },
   });
 
-  // Groups for group tab
-  const groupsQ = useQuery({
-    enabled: !!apiKey && tab === "group",
-    queryKey: ["groups", apiKey],
-    queryFn: async () => {
-      const r = await callTool({ data: { apiKey, name: "list_my_groups", args: {} } });
-      const data = r.ok ? r.data : null;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (Array.isArray(data) ? data : (data as any)?.groups ?? []) as any[];
-    },
-  });
+  // Groups query removed (tab removed)
 
   // Add expense mutation
   const addMut = useMutation({
@@ -235,8 +227,11 @@ function ExpensesPage() {
         String(e.subcategory ?? "").toLowerCase().includes(q)
       );
     }
+    if (filterCategory !== "all") {
+      list = list.filter((e) => String(e.category ?? "") === filterCategory);
+    }
     return list;
-  }, [allExpenses, search]);
+  }, [allExpenses, search, filterCategory]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -246,26 +241,118 @@ function ExpensesPage() {
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
   const avgPerDay = daysInMonth > 0 ? totalSpent / daysInMonth : 0;
 
-  const monthLabel = today.toLocaleString("en-US", { month: "short" });
   const prevMonthLabel = new Date(today.getFullYear(), today.getMonth() - 1, 1).toLocaleString("en-US", { month: "short" });
 
+  // Derive unique categories from loaded expenses for the filter dropdown
+  const availableCategories = useMemo(() => {
+    const cats = new Set(allExpenses.map((e) => String(e.category ?? "Other")));
+    return Array.from(cats).sort();
+  }, [allExpenses]);
+
+  // Date range label for the button
+  const dateRangeLabel = (() => {
+    const s = new Date(dateStart);
+    const e = new Date(dateEnd);
+    const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    if (s.getFullYear() === e.getFullYear()) return `${fmt(s)} – ${fmt(e)}, ${s.getFullYear()}`;
+    return `${fmt(s)}, ${s.getFullYear()} – ${fmt(e)}, ${e.getFullYear()}`;
+  })();
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" onClick={() => { setShowFilter(false); setShowDatePicker(false); }}>
       {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Expenses</h1>
           <p className="text-sm text-muted-foreground">Track, manage and analyze all your expenses in one place.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="h-9 px-3 rounded-lg bg-input border border-border text-sm flex items-center gap-1.5 hover:bg-accent">
-            <Filter className="size-3.5" /> Filter
-          </button>
-          <div className="h-9 px-3 rounded-lg bg-input border border-border text-sm flex items-center gap-1.5">
-            <Calendar className="size-3.5 text-muted-foreground" />
-            <span>{monthLabel} 1 – {monthLabel} {daysInMonth}, {today.getFullYear()}</span>
-            <ChevronRight className="size-3.5 text-muted-foreground" />
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          {/* Filter by category */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowFilter((v) => !v); setShowDatePicker(false); }}
+              className={`h-9 px-3 rounded-lg bg-input border text-sm flex items-center gap-1.5 hover:bg-accent transition-colors ${filterCategory !== "all" ? "border-primary text-primary" : "border-border"}`}
+            >
+              <Filter className="size-3.5" />
+              Filter
+              {filterCategory !== "all" && (
+                <span className="ml-1 size-4 rounded-full bg-primary text-primary-foreground text-[10px] grid place-items-center font-bold">1</span>
+              )}
+            </button>
+            {showFilter && (
+              <div className="absolute left-0 top-11 z-30 w-52 glass rounded-xl border border-border shadow-xl py-2">
+                <div className="px-3 py-1.5 text-[11px] text-muted-foreground font-medium uppercase tracking-wide">Category</div>
+                {["all", ...availableCategories].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => { setFilterCategory(cat); setShowFilter(false); setPage(1); }}
+                    className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-accent/60 transition-colors ${filterCategory === cat ? "text-primary font-medium" : ""}`}
+                  >
+                    {cat === "all" ? "All Categories" : cat}
+                    {filterCategory === cat && <Check className="size-3.5" />}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* Date range picker */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowDatePicker((v) => !v); setShowFilter(false); }}
+              className="h-9 px-3 rounded-lg bg-input border border-border text-sm flex items-center gap-1.5 hover:bg-accent transition-colors"
+            >
+              <Calendar className="size-3.5 text-muted-foreground" />
+              <span>{dateRangeLabel}</span>
+              <ChevronRight className="size-3.5 text-muted-foreground" />
+            </button>
+            {showDatePicker && (
+              <div className="absolute right-0 top-11 z-30 glass rounded-xl border border-border shadow-xl p-4 w-72">
+                <div className="text-xs font-medium mb-3">Select Date Range</div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[11px] text-muted-foreground block mb-1">From</label>
+                    <input
+                      type="date"
+                      value={dateStart}
+                      onChange={(e) => { setDateStart(e.target.value); setPage(1); }}
+                      className="w-full h-9 px-3 rounded-lg bg-input border border-border text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-muted-foreground block mb-1">To</label>
+                    <input
+                      type="date"
+                      value={dateEnd}
+                      min={dateStart}
+                      onChange={(e) => { setDateEnd(e.target.value); setPage(1); }}
+                      className="w-full h-9 px-3 rounded-lg bg-input border border-border text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => {
+                        const t = new Date();
+                        setDateStart(new Date(t.getFullYear(), t.getMonth(), 1).toISOString().slice(0, 10));
+                        setDateEnd(new Date(t.getFullYear(), t.getMonth() + 1, 0).toISOString().slice(0, 10));
+                        setPage(1);
+                      }}
+                      className="flex-1 h-8 rounded-lg border border-border text-xs hover:bg-accent"
+                    >
+                      This Month
+                    </button>
+                    <button
+                      onClick={() => setShowDatePicker(false)}
+                      className="flex-1 h-8 rounded-lg bg-primary text-primary-foreground text-xs hover:opacity-90"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={() => setShowAdd(true)}
             className="h-9 px-4 rounded-lg bg-gradient-to-r from-primary to-primary-glow text-primary-foreground text-sm font-medium flex items-center gap-1.5 hover:opacity-90"
@@ -301,32 +388,17 @@ function ExpensesPage() {
 
       {/* Table card */}
       <div className="glass rounded-2xl overflow-hidden">
-        {/* Tabs + search */}
+        {/* Search bar */}
         <div className="px-5 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-1">
-            {(["all", "my", "group"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => { setTab(t); setPage(1); }}
-                className={`h-8 px-3 rounded-lg text-sm transition-colors ${tab === t ? "bg-primary/20 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-accent/40"}`}
-              >
-                {t === "all" ? "All Expenses" : t === "my" ? "My Expenses" : "Group Expenses"}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-              <input
-                value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                placeholder="Search expenses…"
-                className="h-8 pl-8 pr-3 rounded-lg bg-input border border-border text-xs focus:outline-none focus:ring-1 focus:ring-ring w-44"
-              />
-            </div>
-            <button className="size-8 rounded-lg bg-input border border-border grid place-items-center hover:bg-accent">
-              <LayoutGrid className="size-3.5 text-muted-foreground" />
-            </button>
+          <div className="font-medium text-sm">All Expenses</div>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              placeholder="Search expenses…"
+              className="h-8 pl-8 pr-3 rounded-lg bg-input border border-border text-xs focus:outline-none focus:ring-1 focus:ring-ring w-44"
+            />
           </div>
         </div>
 
