@@ -14,15 +14,19 @@ Rules:
 - Before mutating data (add/edit/delete/approve/reject), confirm intent briefly.
 - After calling tools, summarize the result in plain language.
 - If the user asks "who owes me / settle up" use group_balances or simplify_group_debts.
-- Today's date: ${new Date().toISOString().slice(0, 10)}.`;
+- Today's date: ${new Date().toISOString().slice(0, 10)}.
+- NEVER ask the user for a group_id, transaction_id, expense_id, or user_id. Always look them up yourself using the appropriate list tool first (e.g. call list_my_groups to find a group by name, then use its id).
+- To send a group invite by email, use send_group_invite (not create_group_invite). send_group_invite takes group_id + emails and sends the email automatically.
+- Tool names are exact: list_my_groups (not list_groups), send_group_invite (not send_invite), etc.`;
 
 const ALLOWED = new Set([
   "add_expense", "list_expenses", "summarize", "edit_expense", "delete_expense", "monthly_report",
-  "create_group", "list_my_groups", "create_group_invite", "redeem_group_invite", "list_group_members",
+  "create_group", "list_my_groups", "create_group_invite", "send_group_invite", "redeem_group_invite", "list_group_members", "leave_group",
   "add_group_expense", "approve_group_expense", "reject_group_expense",
   "list_pending_group_expenses", "list_my_pending_approvals", "list_group_transactions",
   "delete_group_expense", "group_summary", "group_balances", "simplify_group_debts",
   "record_settlement", "list_group_settlements",
+  "list_budgets", "upsert_budget", "delete_budget",
 ]);
 
 const corsHeaders = {
@@ -124,7 +128,7 @@ export const Route = createFileRoute("/api/chat")({
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const convo: any[] = [{ role: "system", content: SYSTEM }, ...messages];
-            const MAX_ITER = 6;
+            const MAX_ITER = 8;
 
             try {
               for (let iter = 0; iter < MAX_ITER; iter++) {

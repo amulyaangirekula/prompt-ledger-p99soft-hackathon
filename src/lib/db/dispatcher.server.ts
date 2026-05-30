@@ -16,7 +16,7 @@ import {
 } from "./tools/expenses.server";
 import {
   createGroup, listMyGroups, createGroupInvite,
-  redeemGroupInvite, listGroupMembers, leaveGroup,
+  redeemGroupInvite, listGroupMembers, leaveGroup, sendGroupInvite,
 } from "./tools/groups.server";
 import {
   addGroupExpense, approveGroupExpense, rejectGroupExpense,
@@ -191,6 +191,23 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
         expires_in_days: { type: "integer", default: 7 },
       },
       required: ["api_key", "group_id"],
+    },
+  },
+  {
+    name: "send_group_invite",
+    description: "Generate an invite code and send it via email to one or more people. Accepts a single email or comma-separated list.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        api_key: { type: "string" },
+        group_id: { type: "string" },
+        emails: {
+          anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
+          description: "Single email or array of emails to invite.",
+        },
+        expires_in_days: { type: "integer", default: 7 },
+      },
+      required: ["api_key", "group_id", "emails"],
     },
   },
   {
@@ -523,6 +540,9 @@ export async function callTool(
         break;
       case "create_group_invite":
         raw = await createGroupInvite(apiKey, args.group_id, args.expires_in_days);
+        break;
+      case "send_group_invite":
+        raw = await sendGroupInvite(apiKey, args.group_id, args.emails, args.expires_in_days);
         break;
       case "redeem_group_invite":
         raw = await redeemGroupInvite(apiKey, args.invite_code);

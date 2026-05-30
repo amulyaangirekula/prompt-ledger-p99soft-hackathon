@@ -6,16 +6,19 @@
  */
 
 export function jwtSubject(accessToken: string): string {
+  return jwtPayload(accessToken).sub as string;
+}
+
+/** Decode and return the full JWT payload (no verification — token is trusted from Supabase). */
+export function jwtPayload(accessToken: string): Record<string, unknown> {
   const parts = accessToken.trim().split(".");
   if (parts.length !== 3) throw new Error("Not a JWT (expected three segments).");
 
   const body = parts[1];
-  // Base64url → Base64 → decode
   const padded = body + "=".repeat((4 - (body.length % 4)) % 4);
   const decoded = Buffer.from(padded, "base64").toString("utf-8");
   const payload = JSON.parse(decoded) as Record<string, unknown>;
 
-  const sub = payload.sub;
-  if (!sub || typeof sub !== "string") throw new Error("JWT missing sub claim.");
-  return sub;
+  if (!payload.sub || typeof payload.sub !== "string") throw new Error("JWT missing sub claim.");
+  return payload;
 }

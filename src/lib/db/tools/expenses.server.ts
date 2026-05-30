@@ -5,9 +5,53 @@
  * Single Responsibility: CRUD + reporting for personal transactions.
  */
 
+import { z } from "zod";
 import { getClientForApiKey } from "../supabase.server";
 import { jwtSubject } from "../jwt.server";
 import { withPendingHint, toolError } from "../pending-hint.server";
+
+// ---------------------------------------------------------------------------
+// Input schemas
+// ---------------------------------------------------------------------------
+
+const DateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD");
+
+const AddExpenseSchema = z.object({
+  date: DateString,
+  amount: z.number().positive(),
+  category: z.string().min(1).max(100),
+  subcategory: z.string().max(100).default(""),
+  note: z.string().max(500).default(""),
+});
+
+const ListExpensesSchema = z.object({
+  start_date: DateString,
+  end_date: DateString,
+});
+
+const SummarizeSchema = z.object({
+  start_date: DateString,
+  end_date: DateString,
+  category: z.string().max(100).nullable().optional(),
+});
+
+const ExpenseIdSchema = z.object({
+  expense_id: z.string().uuid(),
+});
+
+const EditExpenseSchema = z.object({
+  expense_id: z.string().uuid(),
+  date: DateString.nullable().optional(),
+  amount: z.number().positive().nullable().optional(),
+  category: z.string().min(1).max(100).nullable().optional(),
+  subcategory: z.string().max(100).nullable().optional(),
+  note: z.string().max(500).nullable().optional(),
+});
+
+const MonthlyReportSchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2000).max(2100),
+});
 
 export async function addExpense(
   apiKey: string,
@@ -17,6 +61,8 @@ export async function addExpense(
   subcategory = "",
   note = "",
 ): Promise<Record<string, unknown>> {
+  const parsed = AddExpenseSchema.safeParse({ date, amount, category, subcategory, note });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
     const uid = jwtSubject(ac.accessToken);
@@ -24,11 +70,11 @@ export async function addExpense(
     const { data, error } = await ac.client.from("transactions").insert({
       submitted_by: uid,
       payer_id: uid,
-      expense_date: date,
-      amount,
-      category,
-      subcategory: subcategory || "",
-      note: note || "",
+      expense_date: parsed.data.date,
+      amount: parsed.data.amount,
+      category: parsed.data.category,
+      subcategory: parsed.data.subcategory,
+      note: parsed.data.note,
       status: "approved",
       group_id: null,
     }).select("id").single();
@@ -52,6 +98,8 @@ export async function listExpenses(
   startDate: string,
   endDate: string,
 ): Promise<Record<string, unknown>> {
+  const parsed = ListExpensesSchema.safeParse({ start_date: startDate, end_date: endDate });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
 
@@ -59,8 +107,8 @@ export async function listExpenses(
       .from("transactions")
       .select("id,expense_date,amount,category,subcategory,note,created_at,status")
       .is("group_id", null)
-      .gte("expense_date", startDate)
-      .lte("expense_date", endDate)
+      .gte("expense_date", parsed.data.start_date)
+      .lte("expense_date", parsed.data.end_date)
       .order("expense_date", { ascending: false });
 
     if (error) return { result: toolError(`Error listing expenses: ${error.message}`) };
@@ -76,6 +124,8 @@ export async function summarize(
   endDate: string,
   category?: string | null,
 ): Promise<Record<string, unknown>> {
+  const parsed = SummarizeSchema.safeParse({ start_date: startDate, end_date: endDate, category });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
 
@@ -83,10 +133,10 @@ export async function summarize(
       .from("transactions")
       .select("category,amount")
       .is("group_id", null)
-      .gte("expense_date", startDate)
-      .lte("expense_date", endDate);
+      .gte("expense_date", parsed.data.start_date)
+      .lte("expense_date", parsed.data.end_date);
 
-    if (category) q = q.eq("category", category);
+    if (parsed.data.category) q = q.eq("category", parsed.data.category);
 
     const { data, error } = await q;
     if (error) return { result: toolError(`Error summarizing: ${error.message}`) };
@@ -118,6 +168,8 @@ export async function deleteExpense(
   apiKey: string,
   expenseId: string,
 ): Promise<Record<string, unknown>> {
+  const parsed = ExpenseIdSchema.safeParse({ expense_id: expenseId });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
     const uid = jwtSubject(ac.accessToken);
@@ -125,7 +177,7 @@ export async function deleteExpense(
     const { data: check } = await ac.client
       .from("transactions")
       .select("id")
-      .eq("id", expenseId)
+      .eq("id", parsed.data.expense_id)
       .eq("submitted_by", uid)
       .is("group_id", null);
 
@@ -133,10 +185,10 @@ export async function deleteExpense(
       return toolError("Expense not found or you don't have permission to delete it.");
     }
 
-    const { error } = await ac.client.from("transactions").delete().eq("id", expenseId);
+    const { error } = await ac.client.from("transactions").delete().eq("id", parsed.data.expense_id);
     if (error) return { result: toolError(`Delete failed: ${error.message}`) };
 
-    return withPendingHint({ status: "success", message: `Expense ${expenseId} deleted.` }, ac);
+    return withPendingHint({ status: "success", message: `Expense ${parsed.data.expense_id} deleted.` }, ac);
   } catch (e) {
     return { result: toolError(`Delete failed: ${String(e)}`) };
   }
@@ -151,6 +203,8 @@ export async function editExpense(
   subcategory?: string | null,
   note?: string | null,
 ): Promise<Record<string, unknown>> {
+  const parsed = EditExpenseSchema.safeParse({ expense_id: expenseId, date, amount, category, subcategory, note });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
     const uid = jwtSubject(ac.accessToken);
@@ -158,7 +212,7 @@ export async function editExpense(
     const { data: check } = await ac.client
       .from("transactions")
       .select("id")
-      .eq("id", expenseId)
+      .eq("id", parsed.data.expense_id)
       .eq("submitted_by", uid)
       .is("group_id", null);
 
@@ -167,11 +221,11 @@ export async function editExpense(
     }
 
     const updates: Record<string, unknown> = {};
-    if (date != null) updates.expense_date = date;
-    if (amount != null) updates.amount = amount;
-    if (category != null) updates.category = category;
-    if (subcategory != null) updates.subcategory = subcategory;
-    if (note != null) updates.note = note;
+    if (parsed.data.date != null) updates.expense_date = parsed.data.date;
+    if (parsed.data.amount != null) updates.amount = parsed.data.amount;
+    if (parsed.data.category != null) updates.category = parsed.data.category;
+    if (parsed.data.subcategory != null) updates.subcategory = parsed.data.subcategory;
+    if (parsed.data.note != null) updates.note = parsed.data.note;
 
     if (Object.keys(updates).length === 0) {
       return toolError("No fields provided to update.");
@@ -180,7 +234,7 @@ export async function editExpense(
     const { data, error } = await ac.client
       .from("transactions")
       .update(updates)
-      .eq("id", expenseId)
+      .eq("id", parsed.data.expense_id)
       .select()
       .single();
 
@@ -201,12 +255,14 @@ export async function monthlyReport(
   month: number,
   year: number,
 ): Promise<Record<string, unknown>> {
+  const parsed = MonthlyReportSchema.safeParse({ month, year });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
 
-    const lastDay = new Date(year, month, 0).getDate();
-    const start = `${year}-${String(month).padStart(2, "0")}-01`;
-    const end = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    const lastDay = new Date(parsed.data.year, parsed.data.month, 0).getDate();
+    const start = `${parsed.data.year}-${String(parsed.data.month).padStart(2, "0")}-01`;
+    const end = `${parsed.data.year}-${String(parsed.data.month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
 
     const { data: rows, error } = await ac.client
       .from("transactions")
@@ -218,11 +274,11 @@ export async function monthlyReport(
 
     if (error) return { result: toolError(`monthly_report: ${error.message}`) };
 
-    const monthName = new Date(year, month - 1, 1).toLocaleString("en-US", { month: "long" });
+    const monthName = new Date(parsed.data.year, parsed.data.month - 1, 1).toLocaleString("en-US", { month: "long" });
 
     if (!rows || rows.length === 0) {
       return withPendingHint({
-        month: `${monthName} ${year}`,
+        month: `${monthName} ${parsed.data.year}`,
         message: "No expenses recorded this month.",
         total_spent: 0,
       }, ac);
@@ -270,7 +326,7 @@ export async function monthlyReport(
     const weekday = total - weekend;
 
     return withPendingHint({
-      month: `${monthName} ${year}`,
+      month: `${monthName} ${parsed.data.year}`,
       total_spent: Math.round(total * 100) / 100,
       transaction_count: rows.length,
       top_categories: topCategories,

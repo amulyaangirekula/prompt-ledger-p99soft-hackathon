@@ -4,13 +4,94 @@ import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import {
   Send, Sparkles, Wrench, CheckCircle2, AlertCircle,
-  Paperclip, Mic, MicOff, X, KeyRound,
+  Mic, MicOff, X, KeyRound,
   ThumbsUp, ThumbsDown, BarChart2, List, GitCompare,
   Plus, Wrench as ToolsIcon, FileText, Image,
+  CreditCard, Users, PiggyBank, ChevronDown,
 } from "lucide-react";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SR = any;
+
+// ---------------------------------------------------------------------------
+// Tools popover data
+// ---------------------------------------------------------------------------
+
+const TOOL_GROUPS = [
+  {
+    id: "expense",
+    label: "Expense Management",
+    icon: CreditCard,
+    color: "text-blue-400",
+    bg: "bg-blue-500/20",
+    tools: [
+      { name: "add_expense", desc: "Add a personal expense" },
+      { name: "list_expenses", desc: "List expenses by date range" },
+      { name: "edit_expense", desc: "Edit an existing expense" },
+      { name: "delete_expense", desc: "Delete an expense by ID" },
+    ],
+  },
+  {
+    id: "reports",
+    label: "Reports & Analytics",
+    icon: BarChart2,
+    color: "text-primary",
+    bg: "bg-primary/20",
+    tools: [
+      { name: "summarize", desc: "Spending totals by category" },
+      { name: "monthly_report", desc: "Full monthly spending report" },
+    ],
+  },
+  {
+    id: "groups",
+    label: "Groups & Splitting",
+    icon: Users,
+    color: "text-green-400",
+    bg: "bg-green-500/20",
+    tools: [
+      { name: "create_group", desc: "Create a new group" },
+      { name: "list_my_groups", desc: "List all your groups" },
+      { name: "create_group_invite", desc: "Generate an invite code" },
+      { name: "redeem_group_invite", desc: "Join a group via invite" },
+      { name: "list_group_members", desc: "List members of a group" },
+      { name: "add_group_expense", desc: "Add a shared group expense" },
+      { name: "list_group_transactions", desc: "List group transactions" },
+      { name: "group_summary", desc: "Group spending breakdown" },
+      { name: "group_balances", desc: "Net balance per member" },
+      { name: "simplify_group_debts", desc: "Minimum transfers to settle" },
+      { name: "record_settlement", desc: "Record a payment between members" },
+      { name: "list_group_settlements", desc: "List settlement payments" },
+    ],
+  },
+  {
+    id: "approvals",
+    label: "Approvals",
+    icon: CheckCircle2,
+    color: "text-emerald-400",
+    bg: "bg-emerald-500/20",
+    tools: [
+      { name: "list_my_pending_approvals", desc: "Expenses waiting for your approval" },
+      { name: "approve_group_expense", desc: "Approve a pending expense" },
+      { name: "reject_group_expense", desc: "Reject a pending expense" },
+      { name: "list_pending_group_expenses", desc: "Pending expenses in a group" },
+      { name: "delete_group_expense", desc: "Delete a pending group expense" },
+    ],
+  },
+  {
+    id: "budgets",
+    label: "Budget Settings",
+    icon: PiggyBank,
+    color: "text-violet-400",
+    bg: "bg-violet-500/20",
+    tools: [
+      { name: "list_budgets", desc: "List all budgets with live spend" },
+      { name: "upsert_budget", desc: "Create or update a budget" },
+      { name: "delete_budget", desc: "Delete a budget" },
+    ],
+  },
+];
+
+const TOTAL_TOOLS = TOOL_GROUPS.reduce((s, g) => s + g.tools.length, 0);
 
 type ToolEvent = { id: string; name: string; ok?: boolean; args?: unknown; data?: unknown };
 type Msg =
@@ -34,6 +115,104 @@ const MSG_ACTIONS = [
 
 function nowTime() {
   return new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+// ---------------------------------------------------------------------------
+// Tools popover
+// ---------------------------------------------------------------------------
+
+function ToolsPopover(_props: { onSelectTool: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`h-7 px-2 rounded-lg text-xs flex items-center gap-1 transition-colors shrink-0 ${
+          open
+            ? "bg-primary/20 text-primary"
+            : "text-muted-foreground hover:text-foreground hover:bg-accent"
+        }`}
+      >
+        <ToolsIcon className="size-3.5" />
+        Tools
+        <ChevronDown className={`size-3 transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute bottom-full left-0 mb-2 w-80 glass rounded-2xl border border-border shadow-2xl overflow-hidden z-50">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Wrench className="size-3.5 text-primary" />
+              <span className="text-xs font-semibold">Available AI Tools</span>
+            </div>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-semibold">
+              {TOTAL_TOOLS} tools
+            </span>
+          </div>
+
+          {/* Groups */}
+          <div className="max-h-80 overflow-y-auto divide-y divide-border/60">
+            {TOOL_GROUPS.map((group) => {
+              const Icon = group.icon;
+              const isExpanded = expandedGroup === group.id;
+              return (
+                <div key={group.id}>
+                  {/* Group header */}
+                  <button
+                    type="button"
+                    onClick={() => setExpandedGroup(isExpanded ? null : group.id)}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-accent/40 transition-colors text-left"
+                  >
+                    <div className={`size-6 rounded-md grid place-items-center shrink-0 ${group.bg}`}>
+                      <Icon className={`size-3.5 ${group.color}`} />
+                    </div>
+                    <span className="flex-1 text-xs font-medium">{group.label}</span>
+                    <span className="text-[10px] text-muted-foreground mr-1">
+                      {group.tools.length}
+                    </span>
+                    <ChevronDown
+                      className={`size-3 text-muted-foreground transition-transform duration-150 ${isExpanded ? "rotate-180" : ""}`}
+                    />
+                  </button>
+
+                  {/* Tool list */}
+                  {isExpanded && (
+                    <div className="bg-secondary/20 divide-y divide-border/40">
+                      {group.tools.map((tool) => (
+                        <button
+                          key={tool.name}
+                          type="button"
+                          className="w-full flex items-start gap-2.5 px-4 py-2 hover:bg-accent/50 transition-colors text-left group"
+                        >
+                          <code className={`text-[10px] font-mono font-semibold mt-0.5 shrink-0 ${group.color}`}>
+                            {tool.name}
+                          </code>
+                          <span className="text-[11px] text-muted-foreground group-hover:text-foreground transition-colors leading-relaxed">
+                            — {tool.desc}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Footer */}
+          <div className="px-4 py-2.5 border-t border-border">
+            <p className="text-[10px] text-muted-foreground text-center">
+              Use natural language to invoke any tool
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ChatPanel({ apiKey, userName = "there" }: { apiKey: string; userName?: string }) {
@@ -474,10 +653,7 @@ export function ChatPanel({ apiKey, userName = "there" }: { apiKey: string; user
             <Plus className="size-4" />
           </button>
 
-          <button type="button"
-            className="h-7 px-2 rounded-lg text-xs flex items-center gap-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0">
-            <ToolsIcon className="size-3.5" /> Tools
-          </button>
+          <ToolsPopover onSelectTool={() => {}} />
 
           <input
             value={input}

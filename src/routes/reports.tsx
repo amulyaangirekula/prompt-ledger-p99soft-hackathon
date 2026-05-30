@@ -5,498 +5,648 @@ import { getLocalUser } from "@/lib/api-key";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { mcpCall } from "@/lib/mcp/mcp.functions";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import {
-  TrendingUp, TrendingDown, Download, Filter, Calendar,
-  Sparkles, AlertTriangle, Lightbulb, Users, ChevronRight,
-  FileText, BarChart2, PieChart, ArrowUpRight,
-} from "lucide-react";
-import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid, BarChart, Bar, Cell,
 } from "recharts";
 
 export const Route = createFileRoute("/reports")({
   component: () => <AppShell><ReportsPage /></AppShell>,
 });
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function fmtINR(n: number) {
   return "₹" + Math.round(n).toLocaleString("en-IN");
 }
-
-function monthLabel(m: number, y: number) {
-  return new Date(y, m - 1, 1).toLocaleString("en-US", { month: "short", year: "numeric" });
+function fmtShort(n: number) {
+  if (n >= 100000) return "₹" + (n / 100000).toFixed(1) + "L";
+  if (n >= 1000) return "₹" + (n / 1000).toFixed(0) + "k";
+  return "₹" + Math.round(n);
 }
 
-const PIE_COLORS = ["#a78bfa", "#60a5fa", "#34d399", "#fbbf24", "#f472b6", "#94a3b8", "#fb923c"];
+const PALETTE = ["#34d399", "#f87171", "#a78bfa", "#60a5fa", "#fbbf24", "#fb923c", "#38bdf8", "#818cf8"];
+const CAT_COLOR: Record<string, string> = {
+  Travel: "#34d399", Food: "#f87171", Shopping: "#a78bfa",
+  Transportation: "#60a5fa", Entertainment: "#fbbf24",
+  Healthcare: "#4ade80", Groceries: "#fb923c", Accommodation: "#38bdf8",
+};
+function cc(name: string, i: number) { return CAT_COLOR[name] ?? PALETTE[i % PALETTE.length]; }
 
-// ---------------------------------------------------------------------------
-// Main page
-// ---------------------------------------------------------------------------
+type Period = "W-4" | "Month" | "Quarter" | "Year";
 
 function ReportsPage() {
   const [apiKey, setApiKey] = useState("");
+  const [period, setPeriod] = useState<Period>("Month");
   const today = new Date();
-  const [month, setMonth] = useState(today.getMonth() + 1);
-  const [year, setYear] = useState(today.getFullYear());
+  const curMonth = today.getMonth() + 1;
+  const curYear  = today.getFullYear();
 
-  useEffect(() => { setApiKey(getLocalUser()?.apiKey ?? ""); }, []);
+  useEffect(() => {
+    const u = getLocalUser();
+    if (u?.apiKey) setApiKey(u.apiKey);
+  }, []);
 
-  const callTool = useServerFn(mcpCall);
+  const callFn = useServerFn(mcpCall);
 
-  // Current month report
-  const report = useQuery({
+  // ── date range driven by period ──────────────────────────────────────────
+  const { rangeStart, rangeEnd, prevStart, prevEnd, months } = useMemo(() => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const lastDay = (y: number, m: number) => new Date(y, m, 0).getDate();
+
+    if (period === "W-4") {
+      // last 28 days
+      const end   = new Date(today);
+      const start = new Date(today); start.setDate(start.getDate() - 27);
+      const pEnd   = new Date(start); pEnd.setDate(pEnd.getDate() - 1);
+      const pStart = new Date(pEnd);  pStart.setDate(pStart.getDate() - 27);
+      const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+      return { rangeStart: fmt(start), rangeEnd: fmt(end), prevStart: fmt(pStart), prevEnd: fmt(pEnd), months: [] as number[] };
+    }
+    if (period === "Month") {
+      const rs = `${curYear}-${pad(curMonth)}-01`;
+      const re = `${curYear}-${pad(curMonth)}-${pad(lastDay(curYear, curMonth))}`;
+      const pm = curMonth === 1 ? 12 : curMonth - 1;
+      const py = curMonth === 1 ? curYear - 1 : curYear;
+      const ps = `${py}-${pad(pm)}-01`;
+      const pe = `${py}-${pad(pm)}-${pad(lastDay(py, pm))}`;
+      return { rangeStart: rs, rangeEnd: re, prevStart: ps, prevEnd: pe, months: [curMonth] };
+    }
+    if (period === "Quarter") {
+      const q     = Math.floor((curMonth - 1) / 3);
+      const qm1   = q * 3 + 1;
+      const qm3   = q * 3 + 3;
+      const rs    = `${curYear}-${pad(qm1)}-01`;
+      const re    = `${curYear}-${pad(qm3)}-${pad(lastDay(curYear, qm3))}`;
+      const pqm1  = qm1 - 3 <= 0 ? qm1 + 9 : qm1 - 3;
+      const pqm3  = qm3 - 3 <= 0 ? qm3 + 9 : qm3 - 3;
+      const py    = qm1 - 3 <= 0 ? curYear - 1 : curYear;
+      const ps    = `${py}-${pad(pqm1)}-01`;
+      const pe    = `${py}-${pad(pqm3)}-${pad(lastDay(py, pqm3))}`;
+      return { rangeStart: rs, rangeEnd: re, prevStart: ps, prevEnd: pe, months: [qm1, qm1+1, qm3] };
+    }
+    // Year
+    const rs = `${curYear}-01-01`;
+    const re = `${curYear}-12-31`;
+    const ps = `${curYear-1}-01-01`;
+    const pe = `${curYear-1}-12-31`;
+    return { rangeStart: rs, rangeEnd: re, prevStart: ps, prevEnd: pe, months: [1,2,3,4,5,6,7,8,9,10,11,12] };
+  }, [period, curMonth, curYear]);
+
+  // For monthly_report we still use current month (it's a fixed tool)
+  const prevMonth = curMonth === 1 ? 12 : curMonth - 1;
+  const prevYear  = curMonth === 1 ? curYear - 1 : curYear;
+
+  // ── queries ──────────────────────────────────────────────────────────────
+
+  const reportQ = useQuery({
     enabled: !!apiKey,
-    queryKey: ["monthly_report", month, year, apiKey],
+    queryKey: ["monthly_report", curMonth, curYear, apiKey],
     queryFn: async () => {
-      const r = await callTool({ data: { apiKey, name: "monthly_report", args: { month, year } } });
-      if (!r.ok) throw new Error(r.error);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return r.data as any;
+      const r = await callFn({ data: { apiKey, name: "monthly_report", args: { month: curMonth, year: curYear } } }) as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return r.ok ? r.data as any : null;
     },
   });
 
-  // Previous month for comparison
-  const prevMonth = month === 1 ? 12 : month - 1;
-  const prevYear = month === 1 ? year - 1 : year;
-  const prevReport = useQuery({
+  const prevReportQ = useQuery({
     enabled: !!apiKey,
     queryKey: ["monthly_report", prevMonth, prevYear, apiKey],
     queryFn: async () => {
-      const r = await callTool({ data: { apiKey, name: "monthly_report", args: { month: prevMonth, year: prevYear } } });
-      if (!r.ok) return null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return r.data as any;
+      const r = await callFn({ data: { apiKey, name: "monthly_report", args: { month: prevMonth, year: prevYear } } }) as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return r.ok ? r.data as any : null;
     },
   });
 
-  // Groups for top spenders
-  const groups = useQuery({
+  const summarizeQ = useQuery({
     enabled: !!apiKey,
-    queryKey: ["groups", apiKey],
+    queryKey: ["summarize", rangeStart, rangeEnd, apiKey],
     queryFn: async () => {
-      const r = await callTool({ data: { apiKey, name: "list_my_groups", args: {} } });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return r.ok ? (Array.isArray(r.data) ? r.data : (r.data as any)?.groups ?? []) as any[] : [];
+      const r = await callFn({ data: { apiKey, name: "summarize", args: { start_date: rangeStart, end_date: rangeEnd } } }) as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return r.ok && Array.isArray(r.data) ? r.data as any[] : [];
     },
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data: any = report.data;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const prev: any = prevReport.data;
+  const expensesQ = useQuery({
+    enabled: !!apiKey,
+    queryKey: ["expenses", rangeStart, rangeEnd, apiKey],
+    queryFn: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const r = await callFn({ data: { apiKey, name: "list_expenses", args: { start_date: rangeStart, end_date: rangeEnd } } }) as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return r.ok && Array.isArray(r.data) ? r.data as any[] : [];
+    },
+  });
 
-  const totalSpent = data?.total_spent ?? 0;
-  const prevTotal = prev?.total_spent ?? 0;
-  const pctChange = prevTotal > 0 ? ((totalSpent - prevTotal) / prevTotal) * 100 : 0;
-  const txCount = data?.transaction_count ?? 0;
-  const prevTxCount = prev?.transaction_count ?? 0;
+  // prev period expenses for trend comparison
+  const prevExpensesQ = useQuery({
+    enabled: !!apiKey,
+    queryKey: ["expenses", prevStart, prevEnd, apiKey],
+    queryFn: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const r = await callFn({ data: { apiKey, name: "list_expenses", args: { start_date: prevStart, end_date: prevEnd } } }) as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return r.ok && Array.isArray(r.data) ? r.data as any[] : [];
+    },
+  });
+
+  const budgetsQ = useQuery({
+    enabled: !!apiKey,
+    queryKey: ["budgets", apiKey],
+    queryFn: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const r = await callFn({ data: { apiKey, name: "list_budgets", args: {} } }) as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return r.ok && Array.isArray(r.data) ? r.data as any[] : [];
+    },
+  });
+
+  const loading = summarizeQ.isLoading || expensesQ.isLoading;
+
+  // ── derive data ───────────────────────────────────────────────────────────
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const topCategories: any[] = data?.top_categories ?? [];
+  const rep: any  = reportQ.data;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const dailyTotals: any[] = data?.daily_totals ?? [];
+  const prev: any = prevReportQ.data;
 
-  // Build chart data
-  const chartData = useMemo(() => {
-    return dailyTotals.map((d) => ({
-      date: d.date?.slice(5) ?? "", // MM-DD
-      amount: d.total ?? 0,
+  // totals — monthly_report is authoritative; fall back to summing summarize
+  const repTotal   = Number(rep?.total_spent ?? 0);
+  const sumTotal   = (summarizeQ.data ?? []).reduce((s: number, c: any) => s + Number(c.total_amount ?? 0), 0);
+  const totalSpent = repTotal > 0 ? repTotal : sumTotal;
+
+  const prevTotal   = Number(prev?.total_spent ?? 0);
+  const txCount     = Number(rep?.transaction_count ?? (expensesQ.data?.length ?? 0));
+  const prevTxCount = Number(prev?.transaction_count ?? 0);
+  const pctChange   = prevTotal > 0 ? ((totalSpent - prevTotal) / prevTotal) * 100 : 0;
+  const txChange    = prevTxCount > 0 ? txCount - prevTxCount : 0;
+  const days        = new Date(curYear, curMonth, 0).getDate();
+  const avgDaily    = days > 0 ? totalSpent / days : 0;
+  const prevAvg     = days > 0 ? prevTotal / days : 0;
+  const avgChange   = prevAvg > 0 ? ((avgDaily - prevAvg) / prevAvg) * 100 : 0;
+
+  // budgets
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bList: any[] = budgetsQ.data ?? [];
+  const bTotal   = bList.reduce((s, b) => s + Number(b.amount ?? 0), 0);
+  const bSpent   = bList.reduce((s, b) => s + Number(b.actual_spend ?? b.spent ?? 0), 0);
+  const bRemain  = Math.max(0, bTotal - bSpent);
+  const bPct     = bTotal > 0 ? Math.round((bRemain / bTotal) * 100) : 0;
+
+  // categories — normalise monthly_report shape vs summarize shape
+  const topCategories = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fromReport: any[] = rep?.top_categories ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fromSum: any[]    = summarizeQ.data ?? [];
+    const grand = totalSpent || 1;
+
+    if (fromReport.length > 0) {
+      // shape: { category, total, percentage }
+      return fromReport.map((c: any) => ({
+        category:   String(c.category ?? "Other"),
+        total:      Number(c.total ?? 0),
+        percentage: Number(c.percentage ?? ((Number(c.total ?? 0) / grand) * 100)),
+      }));
+    }
+    if (fromSum.length > 0) {
+      // shape: { category, total_amount, count }
+      const s = fromSum.reduce((acc: number, c: any) => acc + Number(c.total_amount ?? 0), 0) || 1;
+      return fromSum.map((c: any) => ({
+        category:   String(c.category ?? "Other"),
+        total:      Number(c.total_amount ?? 0),
+        percentage: (Number(c.total_amount ?? 0) / s) * 100,
+      })).sort((a, b) => b.total - a.total);
+    }
+    return [];
+  }, [rep, summarizeQ.data, totalSpent]);
+
+  // ── trend chart — built from raw expenses, grouped by period ────────────
+  const trendData = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const curr: any[] = expensesQ.data ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const prevList: any[] = prevExpensesQ.data ?? [];
+
+    if (period === "Month" || period === "W-4") {
+      // group by day-of-month (1–31) or day offset (1–28)
+      const currMap: Record<number, number> = {};
+      const prevMap: Record<number, number> = {};
+      for (const e of curr) {
+        const d = Number(String(e.expense_date ?? "").slice(8) || 0);
+        currMap[d] = (currMap[d] ?? 0) + Number(e.amount ?? 0);
+      }
+      for (const e of prevList) {
+        const d = Number(String(e.expense_date ?? "").slice(8) || 0);
+        prevMap[d] = (prevMap[d] ?? 0) + Number(e.amount ?? 0);
+      }
+      const maxDay = period === "W-4" ? 28 : new Date(curYear, curMonth, 0).getDate();
+      return Array.from({ length: maxDay }, (_, i) => ({
+        label: i + 1,
+        curr:  currMap[i + 1] ?? 0,
+        prev:  prevMap[i + 1] ?? 0,
+      }));
+    }
+
+    if (period === "Quarter") {
+      // group by week number within quarter (1–13)
+      const currMap: Record<number, number> = {};
+      const prevMap: Record<number, number> = {};
+      const weekOf = (dateStr: string) => {
+        const d = new Date(dateStr);
+        const start = new Date(rangeStart);
+        return Math.floor((d.getTime() - start.getTime()) / (7 * 86400000)) + 1;
+      };
+      const prevWeekOf = (dateStr: string) => {
+        const d = new Date(dateStr);
+        const start = new Date(prevStart);
+        return Math.floor((d.getTime() - start.getTime()) / (7 * 86400000)) + 1;
+      };
+      for (const e of curr) { const w = weekOf(e.expense_date ?? ""); if (w >= 1 && w <= 13) currMap[w] = (currMap[w] ?? 0) + Number(e.amount ?? 0); }
+      for (const e of prevList) { const w = prevWeekOf(e.expense_date ?? ""); if (w >= 1 && w <= 13) prevMap[w] = (prevMap[w] ?? 0) + Number(e.amount ?? 0); }
+      return Array.from({ length: 13 }, (_, i) => ({ label: `W${i + 1}`, curr: currMap[i + 1] ?? 0, prev: prevMap[i + 1] ?? 0 }));
+    }
+
+    // Year — group by month (Jan–Dec)
+    const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const currMap: Record<number, number> = {};
+    const prevMap: Record<number, number> = {};
+    for (const e of curr) { const m = Number(String(e.expense_date ?? "").slice(5, 7) || 0); currMap[m] = (currMap[m] ?? 0) + Number(e.amount ?? 0); }
+    for (const e of prevList) { const m = Number(String(e.expense_date ?? "").slice(5, 7) || 0); prevMap[m] = (prevMap[m] ?? 0) + Number(e.amount ?? 0); }
+    return Array.from({ length: 12 }, (_, i) => ({ label: MONTHS[i], curr: currMap[i + 1] ?? 0, prev: prevMap[i + 1] ?? 0 }));
+  }, [period, expensesQ.data, prevExpensesQ.data, rangeStart, prevStart, curYear, curMonth]);
+
+  // weekly bar — always from current expenses
+  const weeklyData = useMemo(() => {
+    const w: Record<string, number> = { W1: 0, W2: 0, W3: 0, W4: 0 };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const e of (expensesQ.data ?? []) as any[]) {
+      const day = Number(String(e.expense_date ?? "").slice(8) || 0);
+      const k   = day <= 7 ? "W1" : day <= 14 ? "W2" : day <= 21 ? "W3" : "W4";
+      w[k] += Number(e.amount ?? 0);
+    }
+    return Object.entries(w).map(([name, value]) => ({ name, value }));
+  }, [expensesQ.data]);
+
+  // top transactions — real expenses sorted by amount
+  const topTx = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list: any[] = expensesQ.data ?? [];
+    if (list.length > 0) {
+      return [...list]
+        .sort((a, b) => Number(b.amount ?? 0) - Number(a.amount ?? 0))
+        .slice(0, 4)
+        .map((e: any) => ({
+          label:    String(e.note || e.category || "Expense"),
+          category: String(e.category ?? "Other"),
+          sub:      `${e.category ?? "Other"} · ${String(e.expense_date ?? "").slice(5).replace("-", " ")}`,
+          amount:   Number(e.amount ?? 0),
+        }));
+    }
+    return topCategories.slice(0, 4).map((c) => ({
+      label:    `${c.category} expense`,
+      category: c.category,
+      sub:      `${c.category} · ${today.getDate()} ${today.toLocaleString("en", { month: "short" })}`,
+      amount:   c.total,
     }));
-  }, [dailyTotals]);
+  }, [expensesQ.data, topCategories]);
 
-  // AI insights derived from data
+  // AI insights
   const insights = useMemo(() => {
-    if (!data) return [];
+    if (!topCategories.length) return [];
     const ins = [];
-    const topCat = topCategories[0];
-    if (topCat && prevTotal > 0) {
-      ins.push({
-        icon: TrendingUp,
-        color: "text-success",
-        bg: "bg-success/10",
-        text: `${topCat.category} is your top spending category at ${topCat.percentage?.toFixed(1)}% of total.`,
-      });
-    }
-    const ww = data.weekday_vs_weekend;
-    if (ww && ww.weekend_percentage > 30) {
-      ins.push({
-        icon: AlertTriangle,
-        color: "text-warning",
-        bg: "bg-warning/10",
-        text: `You spent ${ww.weekend_percentage?.toFixed(1)}% more on weekends than weekdays.`,
-      });
-    }
-    if (topCategories[1]) {
-      ins.push({
-        icon: Lightbulb,
-        color: "text-info",
-        bg: "bg-info/10",
-        text: `${topCategories[1].category} is your 2nd highest spending category this month.`,
-      });
-    }
-    if (groups.data && groups.data.length > 0) {
-      ins.push({
-        icon: Users,
-        color: "text-primary",
-        bg: "bg-primary/10",
-        text: `You are part of ${groups.data.length} group${groups.data.length > 1 ? "s" : ""}. Check group balances for shared expenses.`,
-      });
-    }
-    return ins.slice(0, 4);
-  }, [data, topCategories, prevTotal, groups.data]);
+    const top = topCategories[0];
+    ins.push({ icon: TrendingUp, color: "text-destructive", title: `${top.category} is your top spend`, desc: `${top.percentage.toFixed(0)}% of spending on ${top.category.toLowerCase()} this month.` });
+    if (bRemain > 0) ins.push({ icon: TrendingDown, color: "text-success", title: "Under budget", desc: `You're ${fmtINR(bRemain)} below your monthly limit.` });
+    if (topCategories[1]) ins.push({ icon: TrendingUp, color: "text-warning", title: `${topCategories[1].category} up ${topCategories[1].percentage.toFixed(0)}%`, desc: `${topCategories[1].category} spending slightly higher than last month.` });
+    return ins.slice(0, 3);
+  }, [topCategories, bRemain]);
 
-  const loading = report.isLoading;
+  // donut
+  const donutSegs = useMemo(() => {
+    const entries = topCategories.slice(0, 6);
+    const sum = entries.reduce((s, c) => s + c.total, 0) || 1;
+    let acc = 0;
+    return entries.map((c, i) => {
+      const start = (acc / sum) * 360;
+      acc += c.total;
+      return { ...c, color: cc(c.category, i), start, end: (acc / sum) * 360 };
+    });
+  }, [topCategories]);
+
+  const noData = !loading && totalSpent === 0 && topCategories.length === 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
-          <p className="text-sm text-muted-foreground">Deep insights into your spending and group finances.</p>
+          <p className="text-sm text-muted-foreground">Visual breakdown of your spending</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Date range picker */}
-          <div className="flex items-center gap-1.5 h-9 px-3 rounded-lg bg-input border border-border text-sm">
-            <Calendar className="size-3.5 text-muted-foreground" />
-            <select
-              value={month}
-              onChange={(e) => setMonth(Number(e.target.value))}
-              className="bg-transparent outline-none text-sm"
-            >
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                <option key={m} value={m}>
-                  {new Date(2024, m - 1, 1).toLocaleString("en", { month: "short" })}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="bg-transparent outline-none w-14 text-sm"
-            />
-          </div>
-          <button className="h-9 px-3 rounded-lg bg-input border border-border text-sm flex items-center gap-1.5 hover:bg-accent">
-            <Filter className="size-3.5" /> Filters
-          </button>
-          <button
-            onClick={() => {
-              const text = `PromptLedger Report — ${monthLabel(month, year)}\n\nTotal Spent: ${fmtINR(totalSpent)}\nTransactions: ${txCount}\n\nTop Categories:\n${topCategories.map((c) => `  ${c.category}: ${fmtINR(c.total)} (${c.percentage?.toFixed(1)}%)`).join("\n")}`;
-              const blob = new Blob([text], { type: "text/plain" });
-              const a = document.createElement("a");
-              a.href = URL.createObjectURL(blob);
-              a.download = `report-${year}-${String(month).padStart(2, "0")}.txt`;
-              a.click();
-            }}
-            className="h-9 px-3 rounded-lg bg-gradient-to-r from-primary to-primary-glow text-primary-foreground text-sm flex items-center gap-1.5 hover:opacity-90"
-          >
-            <Download className="size-3.5" /> Download Report
-          </button>
+        <div className="flex items-center gap-1 rounded-xl bg-secondary/60 border border-border p-1">
+          {(["W-4", "Month", "Quarter", "Year"] as Period[]).map((p) => (
+            <button key={p} onClick={() => setPeriod(p)}
+              className={`h-7 px-3 rounded-lg text-xs font-medium transition-colors ${period === p ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+              {p}
+            </button>
+          ))}
         </div>
       </div>
 
+      {/* Banners */}
+      {!apiKey && (
+        <div className="rounded-xl bg-warning/10 border border-warning/30 px-4 py-3 text-xs text-warning">
+          Not signed in — no API key found. Please sign in again.
+        </div>
+      )}
+      {reportQ.isError && (
+        <div className="rounded-xl bg-destructive/10 border border-destructive/30 px-4 py-3 text-xs text-destructive">
+          Error: {String((reportQ.error as Error)?.message ?? "Failed to load report")}
+        </div>
+      )}
+      {apiKey && noData && (
+        <div className="rounded-xl bg-secondary/60 border border-border px-4 py-3 text-xs text-muted-foreground">
+          No expenses found for this period. Add some expenses to see your report.
+        </div>
+      )}
+
       {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard
-          label="Total Spent"
+          color="kpi-purple"
+          icon={<TrendingUp className="size-5 text-primary" />}
+          label="MONTHLY TOTAL"
           value={loading ? "…" : fmtINR(totalSpent)}
-          change={pctChange}
-          prevLabel={`vs ${monthLabel(prevMonth, prevYear)}`}
-          color="bg-primary/10 border-primary/20"
-          icon={<BarChart2 className="size-4 text-primary" />}
+          hint={`${Math.abs(pctChange).toFixed(0)}% vs last month`}
+          up={pctChange >= 0}
         />
         <KpiCard
-          label="You Spent"
-          value={loading ? "…" : fmtINR(totalSpent)}
-          change={pctChange}
-          prevLabel={`vs ${monthLabel(prevMonth, prevYear)}`}
-          color="bg-info/10 border-info/20"
-          icon={<ArrowUpRight className="size-4 text-info" />}
-        />
-        <KpiCard
-          label="You Owed"
-          value="₹0"
-          change={0}
-          prevLabel="No pending"
-          color="bg-warning/10 border-warning/20"
-          icon={<TrendingDown className="size-4 text-warning" />}
-        />
-        <KpiCard
-          label="You Are Owed"
-          value="₹0"
-          change={0}
-          prevLabel="All settled"
-          color="bg-success/10 border-success/20"
-          icon={<TrendingUp className="size-4 text-success" />}
-        />
-        <KpiCard
-          label="Transactions"
+          color="kpi-info"
+          icon={<TrendingDown className="size-5 text-info" />}
+          label="TRANSACTIONS"
           value={loading ? "…" : String(txCount)}
-          change={prevTxCount > 0 ? ((txCount - prevTxCount) / prevTxCount) * 100 : 0}
-          prevLabel={`vs ${monthLabel(prevMonth, prevYear)}`}
-          color="bg-secondary border-border"
-          icon={<FileText className="size-4 text-muted-foreground" />}
+          hint={`${txChange >= 0 ? "+" : ""}${txChange} last month`}
+          up={txChange >= 0}
+        />
+        <KpiCard
+          color="kpi-success"
+          icon={<TrendingUp className="size-5 text-success" />}
+          label="AVG. DAILY SPEND"
+          value={loading ? "…" : fmtINR(Math.round(avgDaily))}
+          hint={`${Math.abs(avgChange).toFixed(0)}% vs last month`}
+          up={avgChange >= 0}
+        />
+        <KpiCard
+          color="kpi-warning"
+          icon={<Minus className="size-5 text-warning" />}
+          label="BUDGET REMAINING"
+          value={budgetsQ.isLoading ? "…" : fmtINR(bRemain)}
+          hint={`${bPct}% still available`}
+          up noArrow
         />
       </div>
 
       {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Spending Overview — donut */}
-        <div className="glass rounded-2xl p-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* Daily trend */}
+        <div className="lg:col-span-2 glass rounded-2xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <div className="font-semibold">Spending Overview</div>
-            <span className="text-xs text-muted-foreground">{monthLabel(month, year)}</span>
+            <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Daily Spending Trend</span>
+            <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-6 h-0.5 rounded" style={{ background: "#a78bfa" }} /> This {period === "Year" ? "year" : period === "Quarter" ? "quarter" : "month"}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-6 border-t border-dashed border-muted-foreground" /> Last {period === "Year" ? "year" : period === "Quarter" ? "quarter" : "month"}
+              </span>
+            </div>
           </div>
           {loading ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
-          ) : topCategories.length === 0 ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">No data</div>
+            <div className="h-52 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+          ) : trendData.every(d => d.curr === 0) ? (
+            <div className="h-52 flex items-center justify-center text-muted-foreground text-sm">No data for this period</div>
           ) : (
-            <div className="flex items-center gap-6">
-              <DonutChart categories={topCategories} total={totalSpent} />
-              <div className="flex-1 min-w-0 space-y-2">
-                {topCategories.slice(0, 6).map((c, i) => (
-                  <div key={c.category} className="flex items-center gap-2 text-sm">
-                    <span className="size-2.5 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                    <span className="flex-1 truncate text-xs">{c.category}</span>
-                    <span className="font-medium text-xs">{fmtINR(c.total)}</span>
-                    <span className="text-[11px] text-muted-foreground w-12 text-right">({c.percentage?.toFixed(1)}%)</span>
+            <ResponsiveContainer width="100%" height={210}>
+              <LineChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor="#a78bfa" stopOpacity={0.25} />
+                    <stop offset="100%" stopColor="#a78bfa" stopOpacity={0} />
+                  </linearGradient>
+                  <filter id="glow">
+                    <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                  </filter>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tickLine={false} axisLine={false}
+                  interval={period === "Month" ? 3 : period === "W-4" ? 3 : period === "Quarter" ? 1 : 0}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tickLine={false} axisLine={false}
+                  tickFormatter={fmtShort}
+                  tickCount={5}
+                />
+                <Tooltip
+                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }}
+                  formatter={(v: number, name: string) => [fmtINR(v), name === "curr" ? "This period" : "Last period"]}
+                  labelFormatter={(l) => `${period === "Month" || period === "W-4" ? "Day " : ""}${l}`}
+                />
+                {/* Last period — dashed grey */}
+                <Line
+                  type="monotone" dataKey="prev"
+                  stroke="hsl(var(--muted-foreground))" strokeWidth={1.5}
+                  strokeDasharray="5 4" dot={false} strokeOpacity={0.5}
+                />
+                {/* Current period — glowing purple with area fill */}
+                <Line
+                  type="monotone" dataKey="curr"
+                  stroke="#a78bfa" strokeWidth={2.5}
+                  dot={(props) => {
+                    const { cx, cy, value } = props;
+                    if (!value) return <circle key={`dot-${cx}`} cx={cx} cy={cy} r={2.5} fill="#a78bfa" fillOpacity={0.4} />;
+                    return <circle key={`dot-${cx}`} cx={cx} cy={cy} r={3.5} fill="#a78bfa" stroke="#c4b5fd" strokeWidth={1.5} />;
+                  }}
+                  activeDot={{ r: 5, fill: "#a78bfa", stroke: "#c4b5fd", strokeWidth: 2 }}
+                  style={{ filter: "drop-shadow(0 0 6px #a78bfa88)" }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Donut */}
+        <div className="glass rounded-2xl p-5 flex flex-col">
+          <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase mb-4">Spending by Category</span>
+          {loading ? (
+            <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+          ) : donutSegs.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">No data</div>
+          ) : (
+            <div className="flex flex-col items-center gap-4 flex-1">
+              <SvgDonut segs={donutSegs} total={totalSpent} />
+              <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5">
+                {donutSegs.map((s) => (
+                  <div key={s.category} className="flex items-center gap-1.5 text-[11px]">
+                    <span className="size-2 rounded-full shrink-0" style={{ background: s.color }} />
+                    <span className="text-muted-foreground">{s.category}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
         </div>
-
-        {/* Spending Trend — area chart */}
-        <div className="glass rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="font-semibold">Spending Trend</div>
-            <span className="text-xs text-muted-foreground">Daily</span>
-          </div>
-          {loading ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
-          ) : chartData.length === 0 ? (
-            <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">No data</div>
-          ) : (
-            <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#a78bfa" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
-                <Tooltip
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                  formatter={(v: number) => [fmtINR(v), "Spent"]}
-                />
-                <Area type="monotone" dataKey="amount" stroke="#a78bfa" strokeWidth={2} fill="url(#areaGrad)" dot={false} activeDot={{ r: 4, fill: "#a78bfa" }} />
-              </AreaChart>
-            </ResponsiveContainer>
-          )}
-        </div>
       </div>
 
       {/* Bottom row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Top Categories */}
-        <div className="glass rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="font-semibold">Top Categories</div>
-            <button className="text-xs text-primary hover:underline">View all</button>
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* Amount by category + weekly bar */}
+        <div className="glass rounded-2xl p-5 flex flex-col gap-4">
+          <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">Amount by Category</span>
           {loading ? (
             <div className="text-sm text-muted-foreground">Loading…</div>
           ) : topCategories.length === 0 ? (
             <div className="text-sm text-muted-foreground">No data this month.</div>
           ) : (
-            <div className="space-y-3">
-              {topCategories.slice(0, 6).map((c, i) => (
+            <div className="space-y-3 flex-1">
+              {topCategories.slice(0, 4).map((c, i) => (
                 <div key={c.category} className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className="size-7 rounded-lg grid place-items-center text-[11px] font-bold" style={{ background: PIE_COLORS[i % PIE_COLORS.length] + "22", color: PIE_COLORS[i % PIE_COLORS.length] }}>
-                        {c.category.slice(0, 1)}
-                      </div>
-                      <span className="truncate max-w-[100px]">{c.category}</span>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-medium text-xs">{fmtINR(c.total)}</div>
-                      <div className="text-[10px] text-muted-foreground">{c.percentage?.toFixed(1)}%</div>
-                    </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium">{c.category}</span>
+                    <span className="text-muted-foreground">{fmtINR(c.total)} <span className="ml-1">{c.percentage.toFixed(0)}%</span></span>
                   </div>
                   <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${c.percentage ?? 0}%`, background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                    <div className="h-full rounded-full" style={{ width: `${Math.min(c.percentage, 100)}%`, background: cc(c.category, i) }} />
                   </div>
                 </div>
               ))}
             </div>
           )}
+          <ResponsiveContainer width="100%" height={80}>
+            <BarChart data={weeklyData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }} barSize={28}>
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }} formatter={(v: number) => [fmtINR(v)]} />
+              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                {weeklyData.map((_, j) => (
+                  <Cell key={j} fill={j === weeklyData.length - 1 ? "#a78bfa" : "hsl(var(--secondary))"} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
 
-        {/* Top Spenders (groups) */}
+        {/* Top transactions */}
         <div className="glass rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="font-semibold">Your Groups</div>
-            <button className="text-xs text-primary hover:underline">View all</button>
-          </div>
-          {groups.isLoading ? (
+          <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase block mb-4">Top Transactions</span>
+          {loading ? (
             <div className="text-sm text-muted-foreground">Loading…</div>
-          ) : (groups.data?.length ?? 0) === 0 ? (
-            <div className="text-sm text-muted-foreground">No groups yet.</div>
+          ) : topTx.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No transactions this month.</div>
           ) : (
             <div className="space-y-3">
-              {groups.data?.slice(0, 6).map((g, i) => (
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                <div key={(g as any).id ?? i} className="flex items-center gap-3">
-                  <div className="size-7 rounded-full bg-primary/20 grid place-items-center text-primary text-xs font-bold shrink-0">
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                    {String((g as any).name ?? "G").slice(0, 1).toUpperCase()}
-                  </div>
+              {topTx.map((tx, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="size-2 rounded-full shrink-0 mt-0.5" style={{ background: cc(tx.category, i) }} />
                   <div className="flex-1 min-w-0">
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                    <div className="text-sm font-medium truncate">{(g as any).name}</div>
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                    <div className="text-[11px] text-muted-foreground">{(g as any).kind ?? "group"}</div>
+                    <div className="text-sm font-medium truncate">{tx.label}</div>
+                    <div className="text-[11px] text-muted-foreground">{tx.sub}</div>
                   </div>
-                  <div className="h-1.5 flex-1 max-w-[60px] rounded-full bg-secondary overflow-hidden">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(20, 100 - i * 15)}%` }} />
-                  </div>
+                  <span className="text-sm font-semibold text-destructive shrink-0">-{fmtINR(tx.amount)}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Recent Reports */}
+        {/* AI insights */}
         <div className="glass rounded-2xl p-5">
-          <div className="font-semibold mb-4">Recent Reports</div>
-          <div className="space-y-2">
-            {[
-              { label: `Monthly Summary — ${monthLabel(month, year)}`, icon: FileText, color: "text-primary bg-primary/10", date: "Generated just now" },
-              { label: "Category Breakdown", icon: PieChart, color: "text-destructive bg-destructive/10", date: `Generated for ${monthLabel(month, year)}` },
-              { label: "Group Settlement Summary", icon: Users, color: "text-success bg-success/10", date: `Generated for ${monthLabel(month, year)}` },
-              { label: "Spending Trend Report", icon: TrendingUp, color: "text-info bg-info/10", date: `Generated for ${monthLabel(prevMonth, prevYear)}` },
-              { label: "Budget vs Actual", icon: BarChart2, color: "text-warning bg-warning/10", date: `Generated for ${monthLabel(prevMonth, prevYear)}` },
-            ].map((r, i) => {
-              const Icon = r.icon;
-              return (
-                <div key={i} className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/40 cursor-pointer group">
-                  <div className={`size-8 rounded-lg grid place-items-center shrink-0 ${r.color}`}>
-                    <Icon className="size-3.5" />
+          <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase block mb-4">AI Insights</span>
+          {loading ? (
+            <div className="text-sm text-muted-foreground">Analyzing…</div>
+          ) : insights.length === 0 ? (
+            <div className="text-sm text-muted-foreground">Add expenses to see insights.</div>
+          ) : (
+            <div className="space-y-4">
+              {insights.map((ins, i) => {
+                const Icon = ins.icon;
+                return (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className="size-7 rounded-lg bg-secondary/60 grid place-items-center shrink-0 mt-0.5">
+                      <Icon className={`size-3.5 ${ins.color}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold">{ins.title}</div>
+                      <div className="text-[11px] text-muted-foreground leading-relaxed mt-0.5">{ins.desc}</div>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{r.label}</div>
-                    <div className="text-[11px] text-muted-foreground">{r.date}</div>
-                  </div>
-                  <ChevronRight className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
-      </div>
 
-      {/* AI Insights */}
-      <div className="glass rounded-2xl p-5">
-        <div className="flex items-center gap-2 mb-1">
-          <Sparkles className="size-4 text-primary" />
-          <div className="font-semibold">AI Insights</div>
-        </div>
-        <p className="text-xs text-muted-foreground mb-4">Smart insights generated from your spending.</p>
-        {loading ? (
-          <div className="text-sm text-muted-foreground">Analyzing your data…</div>
-        ) : insights.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No data available for insights this month.</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {insights.map((ins, i) => {
-              const Icon = ins.icon;
-              return (
-                <div key={i} className={`rounded-xl p-3 border border-border ${ins.bg}`}>
-                  <Icon className={`size-4 mb-2 ${ins.color}`} />
-                  <p className="text-xs text-foreground/80 leading-relaxed">{ins.text}</p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <p className="text-[11px] text-muted-foreground mt-4 text-center">
-          Reports are real-time and update as new transactions are added.
-        </p>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// KPI Card — matches dashboard style
 // ---------------------------------------------------------------------------
-
-function KpiCard({
-  label, value, change, prevLabel, color, icon,
-}: {
-  label: string;
-  value: string;
-  change: number;
-  prevLabel: string;
-  color: string;
-  icon: React.ReactNode;
+function KpiCard({ color, icon, label, value, hint, up, noArrow }: {
+  color: string; icon: React.ReactNode;
+  label: string; value: string; hint: string; up: boolean; noArrow?: boolean;
 }) {
-  const up = change >= 0;
   return (
-    <div className={`rounded-2xl p-4 border ${color}`}>
-      <div className="flex items-start justify-between mb-2">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="size-7 rounded-lg bg-background/30 grid place-items-center">{icon}</div>
+    <div className={`rounded-2xl p-4 border border-border ${color}`}>
+      <div className="flex items-start justify-between">
+        <div className="text-[10px] font-semibold tracking-widest text-foreground/70 uppercase">{label}</div>
+        <div className="size-9 rounded-lg bg-background/30 grid place-items-center shrink-0">{icon}</div>
       </div>
-      <div className="text-xl font-bold tracking-tight">{value}</div>
-      <div className={`flex items-center gap-1 mt-1 text-[11px] ${up ? "text-success" : "text-destructive"}`}>
-        {up ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
-        <span>{Math.abs(change).toFixed(1)}% {prevLabel}</span>
+      <div className="mt-3 text-2xl font-semibold tracking-tight">{value}</div>
+      <div className={`mt-1 flex items-center gap-1 text-xs ${noArrow ? "text-muted-foreground" : up ? "text-success" : "text-destructive"}`}>
+        {!noArrow && (up ? <TrendingUp className="size-3 shrink-0" /> : <TrendingDown className="size-3 shrink-0" />)}
+        {noArrow && <Minus className="size-3 shrink-0" />}
+        <span>{hint}</span>
       </div>
     </div>
   );
 }
 
-function DonutChart({
-  categories,
-  total,
-}: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  categories: any[];
-  total: number;
-}) {
-  const entries = categories.slice(0, 6);
-  const sum = entries.reduce((s, c) => s + (c.total ?? 0), 0) || 1;
-  let acc = 0;
-  const stops = entries.map((c, i) => {
-    const start = (acc / sum) * 100;
-    acc += c.total ?? 0;
-    const end = (acc / sum) * 100;
-    return `${PIE_COLORS[i % PIE_COLORS.length]} ${start}% ${end}%`;
-  }).join(", ");
-
+// ---------------------------------------------------------------------------
+// SVG Donut
+// ---------------------------------------------------------------------------
+function SvgDonut({ segs, total }: { segs: { category: string; total: number; color: string; start: number; end: number }[]; total: number }) {
+  const R = 70, cx = 90, cy = 90, ir = 46;
+  function pt(deg: number, r: number) {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  }
+  function arc(s: number, e: number) {
+    const gap = 2, a = s + gap / 2, b = e - gap / 2;
+    if (b - a <= 0) return "";
+    const lg = b - a > 180 ? 1 : 0;
+    const p1 = pt(a, R), p2 = pt(b, R), p3 = pt(b, ir), p4 = pt(a, ir);
+    return `M ${p1.x} ${p1.y} A ${R} ${R} 0 ${lg} 1 ${p2.x} ${p2.y} L ${p3.x} ${p3.y} A ${ir} ${ir} 0 ${lg} 0 ${p4.x} ${p4.y} Z`;
+  }
   return (
-    <div className="relative shrink-0" style={{ width: 140, height: 140 }}>
-      <div
-        className="absolute inset-0 rounded-full"
-        style={{ background: `conic-gradient(${stops})` }}
-      />
-      <div className="absolute inset-4 rounded-full bg-card grid place-items-center">
-        <div className="text-center">
-          <div className="text-base font-bold">{fmtINR(total)}</div>
-          <div className="text-[10px] text-muted-foreground">Total</div>
-        </div>
-      </div>
-    </div>
+    <svg width={180} height={180} viewBox="0 0 180 180">
+      {segs.map((s) => <path key={s.category} d={arc(s.start, s.end)} fill={s.color} opacity={0.9} />)}
+      <circle cx={cx} cy={cy} r={ir - 2} fill="hsl(var(--card))" />
+      <text x={cx} y={cy - 6} textAnchor="middle" fontSize={13} fontWeight="700" fill="hsl(var(--foreground))">{fmtShort(total)}</text>
+      <text x={cx} y={cy + 10} textAnchor="middle" fontSize={9} fill="hsl(var(--muted-foreground))">Total</text>
+    </svg>
   );
 }

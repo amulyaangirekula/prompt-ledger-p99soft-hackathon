@@ -5,9 +5,40 @@
  * Single Responsibility: group transaction lifecycle and approval workflow.
  */
 
+import { z } from "zod";
 import { getClientForApiKey } from "../supabase.server";
 import { jwtSubject } from "../jwt.server";
 import { withPendingHint, toolError } from "../pending-hint.server";
+
+// ---------------------------------------------------------------------------
+// Input schemas
+// ---------------------------------------------------------------------------
+
+const DateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD");
+
+const AddGroupExpenseSchema = z.object({
+  group_id: z.string().uuid(),
+  expense_date: DateString,
+  amount: z.number().positive(),
+  category: z.string().min(1).max(100),
+  subcategory: z.string().max(100).default(""),
+  note: z.string().max(500).default(""),
+  payer_user_id: z.string().uuid().nullable().optional(),
+});
+
+const TransactionIdSchema = z.object({
+  transaction_id: z.string().uuid(),
+});
+
+const GroupIdSchema = z.object({
+  group_id: z.string().uuid(),
+});
+
+const ListGroupTransactionsSchema = z.object({
+  group_id: z.string().uuid(),
+  start_date: DateString.nullable().optional(),
+  end_date: DateString.nullable().optional(),
+});
 
 export async function addGroupExpense(
   apiKey: string,
@@ -19,16 +50,20 @@ export async function addGroupExpense(
   note = "",
   payerUserId?: string | null,
 ): Promise<Record<string, unknown>> {
+  const parsed = AddGroupExpenseSchema.safeParse({
+    group_id: groupId, expense_date: expenseDate, amount, category, subcategory, note, payer_user_id: payerUserId,
+  });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
     const { data, error } = await ac.client.rpc("fn_add_group_expense", {
-      p_group_id: groupId,
-      p_expense_date: expenseDate,
-      p_amount: amount,
-      p_category: category,
-      p_subcategory: subcategory || "",
-      p_note: note || "",
-      p_payer_id: payerUserId ?? null,
+      p_group_id: parsed.data.group_id,
+      p_expense_date: parsed.data.expense_date,
+      p_amount: parsed.data.amount,
+      p_category: parsed.data.category,
+      p_subcategory: parsed.data.subcategory,
+      p_note: parsed.data.note,
+      p_payer_id: parsed.data.payer_user_id ?? null,
     });
     if (error) return { result: toolError(`fn_add_group_expense: ${error.message}`) };
     return withPendingHint({ status: "success", transaction_id: data as string }, ac);
@@ -42,10 +77,12 @@ async function voteOnTransaction(
   transactionId: string,
   vote: "approve" | "reject",
 ): Promise<Record<string, unknown>> {
+  const parsed = TransactionIdSchema.safeParse({ transaction_id: transactionId });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
     const { data, error } = await ac.client.rpc("fn_vote_on_transaction", {
-      p_transaction_id: transactionId,
+      p_transaction_id: parsed.data.transaction_id,
       p_vote: vote,
     });
     if (error) return { result: toolError(`vote: ${error.message}`) };
@@ -73,12 +110,14 @@ export async function listPendingGroupExpenses(
   apiKey: string,
   groupId: string,
 ): Promise<Record<string, unknown>> {
+  const parsed = GroupIdSchema.safeParse({ group_id: groupId });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
     const { data, error } = await ac.client
       .from("transactions")
       .select("id,submitted_by,payer_id,expense_date,amount,category,subcategory,note,status")
-      .eq("group_id", groupId)
+      .eq("group_id", parsed.data.group_id)
       .eq("status", "pending")
       .order("expense_date", { ascending: false });
     if (error) return { result: toolError(`list_pending_group_expenses: ${error.message}`) };
@@ -112,15 +151,17 @@ export async function listGroupTransactions(
   startDate?: string | null,
   endDate?: string | null,
 ): Promise<Record<string, unknown>> {
+  const parsed = ListGroupTransactionsSchema.safeParse({ group_id: groupId, start_date: startDate, end_date: endDate });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
     let q = ac.client
       .from("transactions")
       .select("id,submitted_by,payer_id,expense_date,amount,category,subcategory,note,status,created_at")
-      .eq("group_id", groupId);
+      .eq("group_id", parsed.data.group_id);
 
-    if (startDate) q = q.gte("expense_date", startDate);
-    if (endDate) q = q.lte("expense_date", endDate);
+    if (parsed.data.start_date) q = q.gte("expense_date", parsed.data.start_date);
+    if (parsed.data.end_date) q = q.lte("expense_date", parsed.data.end_date);
 
     const { data, error } = await q.order("expense_date", { ascending: false });
     if (error) return { result: toolError(`list_group_transactions: ${error.message}`) };
@@ -134,10 +175,12 @@ export async function deleteGroupExpense(
   apiKey: string,
   transactionId: string,
 ): Promise<Record<string, unknown>> {
+  const parsed = TransactionIdSchema.safeParse({ transaction_id: transactionId });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
     const { data, error } = await ac.client.rpc("fn_delete_group_expense", {
-      p_transaction_id: transactionId,
+      p_transaction_id: parsed.data.transaction_id,
     });
     if (error) return { result: toolError(`delete_group_expense: ${error.message}`) };
     return withPendingHint(
@@ -155,16 +198,18 @@ export async function groupSummary(
   startDate?: string | null,
   endDate?: string | null,
 ): Promise<Record<string, unknown>> {
+  const parsed = ListGroupTransactionsSchema.safeParse({ group_id: groupId, start_date: startDate, end_date: endDate });
+  if (!parsed.success) return { result: toolError(`Invalid input: ${parsed.error.message}`) };
   try {
     const ac = await getClientForApiKey(apiKey);
     let q = ac.client
       .from("transactions")
       .select("category,amount,payer_id,expense_date")
-      .eq("group_id", groupId)
+      .eq("group_id", parsed.data.group_id)
       .eq("status", "approved");
 
-    if (startDate) q = q.gte("expense_date", startDate);
-    if (endDate) q = q.lte("expense_date", endDate);
+    if (parsed.data.start_date) q = q.gte("expense_date", parsed.data.start_date);
+    if (parsed.data.end_date) q = q.lte("expense_date", parsed.data.end_date);
 
     const { data, error } = await q;
     if (error) return { result: toolError(`group_summary: ${error.message}`) };
