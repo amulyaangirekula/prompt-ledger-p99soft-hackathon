@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   Bell, Home, Sparkles, Users, Receipt, ClipboardCheck,
-  FileText, Settings, Moon, Sun, LogOut, Search, PiggyBank,
+  FileText, Settings, Moon, Sun, LogOut, Search, PiggyBank, Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clearLocalUser, getLocalUser, type LocalUser } from "@/lib/api-key";
@@ -17,6 +17,7 @@ const NAV = [
   { to: "/approvals", label: "Approvals", icon: ClipboardCheck, badgeKey: "approvals" as const },
   { to: "/reports", label: "Reports", icon: FileText },
   { to: "/chat", label: "AI Workspace", icon: Sparkles, badge: "Beta" },
+  { to: "/ai-tools", label: "AI Tools", icon: Wrench },
   { to: "/budgets", label: "Budgets", icon: PiggyBank },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
