@@ -10,6 +10,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, BarChart, Bar, Cell,
 } from "recharts";
+import { getBudgetSettings } from "@/routes/settings";
 
 export const Route = createFileRoute("/reports")({
   component: () => <AppShell><ReportsPage /></AppShell>,
@@ -37,6 +38,7 @@ type Period = "W-4" | "Month" | "Quarter" | "Year";
 function ReportsPage() {
   const [apiKey, setApiKey] = useState("");
   const [period, setPeriod] = useState<Period>("Month");
+  const [budgetLimit, setBudgetLimit] = useState(0);
   const today = new Date();
   const curMonth = today.getMonth() + 1;
   const curYear  = today.getFullYear();
@@ -44,6 +46,11 @@ function ReportsPage() {
   useEffect(() => {
     const u = getLocalUser();
     if (u?.apiKey) setApiKey(u.apiKey);
+    // load spending limit from settings page localStorage
+    const load = () => setBudgetLimit(getBudgetSettings().limit);
+    load();
+    window.addEventListener("budget-settings-changed", load);
+    return () => window.removeEventListener("budget-settings-changed", load);
   }, []);
 
   const callFn = useServerFn(mcpCall);
@@ -154,16 +161,7 @@ function ReportsPage() {
     },
   });
 
-  const budgetsQ = useQuery({
-    enabled: !!apiKey,
-    queryKey: ["budgets", apiKey],
-    queryFn: async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const r = await callFn({ data: { apiKey, name: "list_budgets", args: {} } }) as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return r.ok && Array.isArray(r.data) ? r.data as any[] : [];
-    },
-  });
+  // budget limit comes from Settings page (localStorage), not the DB
 
   const loading = summarizeQ.isLoading || expensesQ.isLoading;
 
@@ -189,13 +187,9 @@ function ReportsPage() {
   const prevAvg     = days > 0 ? prevTotal / days : 0;
   const avgChange   = prevAvg > 0 ? ((avgDaily - prevAvg) / prevAvg) * 100 : 0;
 
-  // budgets
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const bList: any[] = budgetsQ.data ?? [];
-  const bTotal   = bList.reduce((s, b) => s + Number(b.amount ?? 0), 0);
-  const bSpent   = bList.reduce((s, b) => s + Number(b.actual_spend ?? b.spent ?? 0), 0);
-  const bRemain  = Math.max(0, bTotal - bSpent);
-  const bPct     = bTotal > 0 ? Math.round((bRemain / bTotal) * 100) : 0;
+  // budgets — from Settings page localStorage (spending limit)
+  const bRemain = Math.max(0, budgetLimit - totalSpent);
+  const bPct    = budgetLimit > 0 ? Math.round((bRemain / budgetLimit) * 100) : 0;
 
   // categories — normalise monthly_report shape vs summarize shape
   const topCategories = useMemo(() => {
@@ -406,8 +400,8 @@ function ReportsPage() {
           color="kpi-warning"
           icon={<Minus className="size-5 text-warning" />}
           label="BUDGET REMAINING"
-          value={budgetsQ.isLoading ? "…" : fmtINR(bRemain)}
-          hint={`${bPct}% still available`}
+          value={loading ? "…" : budgetLimit > 0 ? fmtINR(bRemain) : "Not set"}
+          hint={budgetLimit > 0 ? `${bPct}% still available` : "Set limit in Settings"}
           up noArrow
         />
       </div>
