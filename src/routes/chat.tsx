@@ -70,7 +70,7 @@ function ChatPage() {
         {/* Two-column layout */}
         <div className="flex gap-5 flex-1 min-h-0">
           {/* Left: Chat */}
-          <div className="flex-1 min-w-0 glass rounded-2xl overflow-hidden flex flex-col">
+          <div className="flex-1 min-w-0 min-h-0 glass rounded-2xl overflow-hidden flex flex-col">
             <ChatPanel apiKey={apiKey} userName={userName} />
           </div>
 

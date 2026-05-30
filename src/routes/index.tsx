@@ -142,7 +142,7 @@ function DashboardInner() {
 
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 glass rounded-2xl overflow-hidden flex flex-col" style={{ minHeight: 560 }}>
+        <div className="lg:col-span-2 glass rounded-2xl overflow-hidden flex flex-col" style={{ height: 560 }}>
           <div className="px-5 py-4 border-b border-border flex items-center gap-2">
             <Sparkles className="size-4 text-primary" />
             <div className="font-semibold">AI Workspace</div>

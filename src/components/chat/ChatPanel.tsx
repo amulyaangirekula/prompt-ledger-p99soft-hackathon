@@ -253,7 +253,7 @@ export function ChatPanel({ apiKey, userName = "there" }: { apiKey: string; user
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex flex-col min-h-0 h-full overflow-hidden">
       {/* Error banner */}
       {aiError && (
         <div className="mx-4 mt-3 flex items-start gap-2 rounded-lg bg-destructive/15 border border-destructive/30 px-3 py-2.5 text-xs text-destructive">
@@ -269,7 +269,10 @@ export function ChatPanel({ apiKey, userName = "there" }: { apiKey: string; user
       )}
 
       {/* Messages */}
-      <div ref={scroller} className="flex-1 overflow-auto px-5 py-4 space-y-5">
+      <div
+        ref={scroller}
+        className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-5 chat-scroll"
+      >
 
         {/* Empty state — greeting + suggestion cards */}
         {messages.length === 0 && (
