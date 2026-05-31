@@ -61,6 +61,8 @@ function GroupsPage() {
   const [loadingCodeId, setLoadingCodeId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 5;
+  const [showJoin, setShowJoin] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
 
   useEffect(() => {
     const u = getLocalUser();
@@ -168,6 +170,36 @@ function GroupsPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  // Join group with invite code
+  const joinMut = useMutation({
+    mutationFn: async () => {
+      const r = await callTool({ data: { apiKey, name: "redeem_group_invite", args: { invite_code: joinCode.trim() } } });
+      if (!r.ok) throw new Error(r.error);
+      return r.data;
+    },
+    onSuccess: (data) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const returnedGroupId: string = (data as any)?.group_id ?? "";
+      const currentGroupIds = (groupsQ.data ?? []).map((g: any) => g.id ?? g.group_id);
+      if (returnedGroupId && currentGroupIds.includes(returnedGroupId)) {
+        toast.info("You are already a member of this group.");
+        setJoinCode(""); setShowJoin(false);
+        return;
+      }
+      toast.success("Joined group successfully!");
+      setJoinCode(""); setShowJoin(false);
+      qc.invalidateQueries({ queryKey: ["groups"] });
+    },
+    onError: (e) => {
+      const msg = e instanceof Error ? e.message.toLowerCase() : "";
+      if (msg.includes("already") || msg.includes("duplicate") || msg.includes("exists")) {
+        toast.info("You are already a member of this group.");
+      } else {
+        toast.error(e instanceof Error ? e.message : "Invalid or expired code");
+      }
+    },
+  });
+
   const filtered = useMemo(() => {
     const list = [...(groupsQ.data ?? [])];
     // Always sort by most recently created first
@@ -219,12 +251,20 @@ function GroupsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Groups</h1>
           <p className="text-sm text-muted-foreground">Manage your groups and track shared expenses</p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="h-9 px-4 rounded-lg bg-gradient-to-r from-primary to-primary-glow text-primary-foreground text-sm font-medium flex items-center gap-2 hover:opacity-90"
-        >
-          <Plus className="size-4" /> New Group
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowJoin(true)}
+            className="h-9 px-4 rounded-lg border border-border text-sm font-medium flex items-center gap-2 hover:bg-accent transition-colors"
+          >
+            <Users className="size-4" /> Join with Code
+          </button>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="h-9 px-4 rounded-lg bg-gradient-to-r from-primary to-primary-glow text-primary-foreground text-sm font-medium flex items-center gap-2 hover:opacity-90"
+          >
+            <Plus className="size-4" /> New Group
+          </button>
+        </div>
       </div>
 
       {/* Main content: list + detail */}
@@ -417,6 +457,51 @@ function GroupsPage() {
           )}
         </div>
       </div>
+
+      {/* Join group modal */}
+      {showJoin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="glass rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <div className="font-semibold text-lg">Join a Group</div>
+              <button onClick={() => { setShowJoin(false); setJoinCode(""); }} className="text-muted-foreground hover:text-foreground">
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium block mb-1">Invite Code</label>
+                <input
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && joinCode.trim()) joinMut.mutate(); }}
+                  placeholder="Paste your invite code here…"
+                  className="w-full h-10 px-3 rounded-lg bg-input border border-border text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring tracking-wider"
+                  autoFocus
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Ask the group admin for the invite code from the 3-dots menu.
+                </p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => { setShowJoin(false); setJoinCode(""); }}
+                  className="flex-1 h-10 rounded-lg border border-border text-sm hover:bg-accent"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={!joinCode.trim() || joinMut.isPending}
+                  onClick={() => joinMut.mutate()}
+                  className="flex-1 h-10 rounded-lg bg-gradient-to-r from-primary to-primary-glow text-primary-foreground text-sm font-medium disabled:opacity-50 hover:opacity-90"
+                >
+                  {joinMut.isPending ? "Joining…" : "Join Group"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create group modal */}
       {showCreate && (
