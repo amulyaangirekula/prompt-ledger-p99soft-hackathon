@@ -25,6 +25,22 @@ function fmtShort(n: number) {
   return "₹" + Math.round(n);
 }
 
+/** Read a CSS custom property as a resolved color string (works in both themes). */
+function useCssVar(variable: string) {
+  const [val, setVal] = useState("");
+  useEffect(() => {
+    const read = () => {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+      setVal(raw);
+    };
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, [variable]);
+  return val;
+}
+
 const PALETTE = ["#34d399", "#f87171", "#a78bfa", "#60a5fa", "#fbbf24", "#fb923c", "#38bdf8", "#818cf8"];
 const CAT_COLOR: Record<string, string> = {
   Travel: "#34d399", Food: "#f87171", Shopping: "#a78bfa",
@@ -40,6 +56,12 @@ function ReportsPage() {
   const [period, setPeriod] = useState<Period>("Month");
   const [budgetLimit, setBudgetLimit] = useState(0);
   const today = new Date();
+
+  // Theme-aware colors for Recharts (CSS vars don't resolve inside SVG attributes)
+  const cardColor      = useCssVar("--card");
+  const borderColor    = useCssVar("--border");
+  const mutedFgColor   = useCssVar("--muted-foreground");
+  const secondaryColor = useCssVar("--secondary");
   const curMonth = today.getMonth() + 1;
   const curYear  = today.getFullYear();
 
@@ -438,28 +460,28 @@ function ReportsPage() {
                     <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
                   </filter>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={borderColor || "#374151"} vertical={false} />
                 <XAxis
                   dataKey="label"
-                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tick={{ fontSize: 10, fill: mutedFgColor || "#6b7280" }}
                   tickLine={false} axisLine={false}
                   interval={period === "Month" ? 3 : period === "W-4" ? 3 : period === "Quarter" ? 1 : 0}
                 />
                 <YAxis
-                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tick={{ fontSize: 10, fill: mutedFgColor || "#6b7280" }}
                   tickLine={false} axisLine={false}
                   tickFormatter={fmtShort}
                   tickCount={5}
                 />
                 <Tooltip
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }}
+                  contentStyle={{ background: cardColor || "#1e1e2e", border: `1px solid ${borderColor || "#374151"}`, borderRadius: 8, fontSize: 11 }}
                   formatter={(v: number, name: string) => [fmtINR(v), name === "curr" ? "This period" : "Last period"]}
                   labelFormatter={(l) => `${period === "Month" || period === "W-4" ? "Day " : ""}${l}`}
                 />
                 {/* Last period — dashed grey */}
                 <Line
                   type="monotone" dataKey="prev"
-                  stroke="hsl(var(--muted-foreground))" strokeWidth={1.5}
+                  stroke={mutedFgColor || "#6b7280"} strokeWidth={1.5}
                   strokeDasharray="5 4" dot={false} strokeOpacity={0.5}
                 />
                 {/* Current period — glowing purple with area fill */}
@@ -513,31 +535,56 @@ function ReportsPage() {
           ) : topCategories.length === 0 ? (
             <div className="text-sm text-muted-foreground">No data this month.</div>
           ) : (
-            <div className="space-y-3 flex-1">
+            <div className="space-y-4 flex-1">
               {topCategories.slice(0, 4).map((c, i) => (
-                <div key={c.category} className="space-y-1">
+                <div key={c.category} className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium">{c.category}</span>
-                    <span className="text-muted-foreground">{fmtINR(c.total)} <span className="ml-1">{c.percentage.toFixed(0)}%</span></span>
+                    <span className="font-semibold">{c.category}</span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {fmtINR(c.total)}
+                      <span className="ml-2 text-[11px]">{c.percentage.toFixed(0)}%</span>
+                    </span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${Math.min(c.percentage, 100)}%`, background: cc(c.category, i) }} />
+                  <div className="h-2 rounded-full overflow-hidden bg-secondary">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(c.percentage, 100)}%`,
+                        background: `linear-gradient(90deg, ${cc(c.category, i)}cc, ${cc(c.category, i)})`,
+                        boxShadow: `0 0 8px ${cc(c.category, i)}66`,
+                      }}
+                    />
                   </div>
                 </div>
               ))}
             </div>
           )}
-          <ResponsiveContainer width="100%" height={80}>
-            <BarChart data={weeklyData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }} barSize={28}>
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 11 }} formatter={(v: number) => [fmtINR(v)]} />
-              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                {weeklyData.map((_, j) => (
-                  <Cell key={j} fill={j === weeklyData.length - 1 ? "#a78bfa" : "hsl(var(--secondary))"} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+
+          {/* Weekly bar chart */}
+          <div>
+            <div className="text-[10px] text-muted-foreground mb-2 uppercase tracking-widest">Weekly</div>
+            <ResponsiveContainer width="100%" height={80}>
+              <BarChart data={weeklyData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }} barSize={26}>
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: mutedFgColor || "#6b7280" }} tickLine={false} axisLine={false} />
+                <Tooltip
+                  contentStyle={{ background: cardColor || "#fff", border: `1px solid ${borderColor || "#e5e7eb"}`, borderRadius: 8, fontSize: 11 }}
+                  formatter={(v: number) => [fmtINR(v)]}
+                  cursor={{ fill: "#a78bfa11" }}
+                />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                  {weeklyData.map((entry, j) => {
+                    const isActive = entry.value > 0 && j === weeklyData.reduce((mx, d, idx) => d.value > weeklyData[mx].value ? idx : mx, 0);
+                    return (
+                      <Cell
+                        key={j}
+                        fill={entry.value === 0 ? (secondaryColor || "#e5e7eb") : isActive ? "#a78bfa" : "#8b7cc8"}
+                      />
+                    );
+                  })}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
 
         {/* Top transactions */}
