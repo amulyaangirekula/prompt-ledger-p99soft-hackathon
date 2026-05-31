@@ -27,11 +27,12 @@ function fmtShort(n: number) {
 
 /** Read a CSS custom property as a resolved color string (works in both themes). */
 function useCssVar(variable: string) {
-  const [val, setVal] = useState("");
+  const [val, setVal] = useState("#1e1e2e");
   useEffect(() => {
     const read = () => {
+      // getPropertyValue returns the raw value e.g. "oklch(0.21 0.025 280)"
       const raw = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
-      setVal(raw);
+      if (raw) setVal(raw);
     };
     read();
     const obs = new MutationObserver(read);
@@ -39,6 +40,29 @@ function useCssVar(variable: string) {
     return () => obs.disconnect();
   }, [variable]);
   return val;
+}
+
+/** Resolve a CSS variable to a hex/rgb string by painting it on a temp element. */
+function useResolvedColor(variable: string, fallbackDark: string, fallbackLight: string) {
+  const [color, setColor] = useState(fallbackDark);
+  useEffect(() => {
+    const read = () => {
+      const el = document.createElement("div");
+      el.style.color = `var(${variable})`;
+      el.style.position = "absolute";
+      el.style.opacity = "0";
+      el.style.pointerEvents = "none";
+      document.body.appendChild(el);
+      const resolved = getComputedStyle(el).color;
+      document.body.removeChild(el);
+      setColor(resolved || (document.documentElement.classList.contains("dark") ? fallbackDark : fallbackLight));
+    };
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, [variable, fallbackDark, fallbackLight]);
+  return color;
 }
 
 const PALETTE = ["#34d399", "#f87171", "#a78bfa", "#60a5fa", "#fbbf24", "#fb923c", "#38bdf8", "#818cf8"];
@@ -58,10 +82,11 @@ function ReportsPage() {
   const today = new Date();
 
   // Theme-aware colors for Recharts (CSS vars don't resolve inside SVG attributes)
-  const cardColor      = useCssVar("--card");
-  const borderColor    = useCssVar("--border");
-  const mutedFgColor   = useCssVar("--muted-foreground");
-  const secondaryColor = useCssVar("--secondary");
+  const cardColor      = useResolvedColor("--card",            "#1e1e2e", "#ffffff");
+  const borderColor    = useResolvedColor("--border",          "#374151", "#e5e7eb");
+  const mutedFgColor   = useResolvedColor("--muted-foreground","#6b7280", "#9ca3af");
+  const secondaryColor = useResolvedColor("--secondary",       "#27272a", "#f3f4f6");
+  const cardFgColor    = useResolvedColor("--card-foreground", "#f9fafb", "#111827");
   const curMonth = today.getMonth() + 1;
   const curYear  = today.getFullYear();
 
@@ -474,7 +499,13 @@ function ReportsPage() {
                   tickCount={5}
                 />
                 <Tooltip
-                  contentStyle={{ background: cardColor || "#1e1e2e", border: `1px solid ${borderColor || "#374151"}`, borderRadius: 8, fontSize: 11 }}
+                  contentStyle={{
+                    background: cardColor,
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: 8,
+                    fontSize: 11,
+                    color: cardFgColor,
+                  }}
                   formatter={(v: number, name: string) => [fmtINR(v), name === "curr" ? "This period" : "Last period"]}
                   labelFormatter={(l) => `${period === "Month" || period === "W-4" ? "Day " : ""}${l}`}
                 />
@@ -567,9 +598,15 @@ function ReportsPage() {
               <BarChart data={weeklyData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }} barSize={26}>
                 <XAxis dataKey="name" tick={{ fontSize: 10, fill: mutedFgColor || "#6b7280" }} tickLine={false} axisLine={false} />
                 <Tooltip
-                  contentStyle={{ background: cardColor || "#fff", border: `1px solid ${borderColor || "#e5e7eb"}`, borderRadius: 8, fontSize: 11 }}
+                  contentStyle={{
+                    background: cardColor,
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: 8,
+                    fontSize: 11,
+                    color: cardFgColor,
+                  }}
                   formatter={(v: number) => [fmtINR(v)]}
-                  cursor={{ fill: "#a78bfa11" }}
+                  cursor={{ fill: "rgba(167,139,250,0.08)" }}
                 />
                 <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                   {weeklyData.map((entry, j) => {
