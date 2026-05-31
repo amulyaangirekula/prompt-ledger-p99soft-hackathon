@@ -97,7 +97,13 @@ function DashboardInner() {
     queryFn: async () => {
       const r = await callTool({ data: { apiKey: apiKey!, name: "list_expenses", args: { start_date: monthStart, end_date: monthEnd } } });
       if (!r.ok) throw new Error(r.error);
-      return toArray(r.data).slice(0, 8);
+      return toArray(r.data)
+        .sort((a: any, b: any) => {
+          const ta = new Date(a.created_at || a.expense_date || 0).getTime();
+          const tb = new Date(b.created_at || b.expense_date || 0).getTime();
+          return tb - ta;
+        })
+        .slice(0, 5);
     },
   });
 
@@ -162,7 +168,15 @@ function DashboardInner() {
             <div className="p-3 max-h-80 overflow-auto">
               {groups.isLoading && <div className="text-sm text-muted-foreground p-3">Loading…</div>}
               {groups.isError && <div className="text-sm text-destructive p-3">{(groups.error as Error).message}</div>}
-              {(groups.data ?? []).slice(0, 6).map((g, i) => {
+              {(groups.data ?? [])
+                .slice()
+                .sort((a: any, b: any) => {
+                  const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+                  const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+                  return tb - ta;
+                })
+                .slice(0, 5)
+                .map((g, i) => {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const grp: any = g;
                 return (
