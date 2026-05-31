@@ -69,7 +69,13 @@ function AddExpenseModal({
   onSave: (data: { date: string; amount: number; category: string; subcategory: string; note: string }) => void;
   busy: boolean;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = (() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  })();
   const [date, setDate] = useState(today);
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("Food & Dining");
@@ -151,8 +157,15 @@ function ExpensesPage() {
   const [localUser, setLocalUser] = useState<LocalUser | null>(null);
   const [apiKey, setApiKey] = useState("");
   const today = new Date();
-  const [dateStart, setDateStart] = useState(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10));
-  const [dateEnd, setDateEnd] = useState(new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10));
+  // Use local date formatting to avoid UTC timezone shift (IST = UTC+5:30)
+  const toLocalISO = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+  const [dateStart, setDateStart] = useState(toLocalISO(new Date(today.getFullYear(), today.getMonth(), 1)));
+  const [dateEnd, setDateEnd] = useState(toLocalISO(new Date(today.getFullYear(), today.getMonth() + 1, 0)));
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
@@ -192,7 +205,8 @@ function ExpensesPage() {
       const arr: any[] = Array.isArray(r.data) ? r.data : [];
       let total = 0;
       for (const row of arr) total += row.total_amount ?? 0;
-      return { total, count: arr.reduce((s, r) => s + (r.count ?? 0), 0) };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return { total, count: arr.reduce((s: number, row2: any) => s + (row2.count ?? 0), 0) };
     },
   });
 
@@ -333,8 +347,9 @@ function ExpensesPage() {
                     <button
                       onClick={() => {
                         const t = new Date();
-                        setDateStart(new Date(t.getFullYear(), t.getMonth(), 1).toISOString().slice(0, 10));
-                        setDateEnd(new Date(t.getFullYear(), t.getMonth() + 1, 0).toISOString().slice(0, 10));
+                        const toLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+                        setDateStart(toLocal(new Date(t.getFullYear(), t.getMonth(), 1)));
+                        setDateEnd(toLocal(new Date(t.getFullYear(), t.getMonth() + 1, 0)));
                         setPage(1);
                       }}
                       className="flex-1 h-8 rounded-lg border border-border text-xs hover:bg-accent"

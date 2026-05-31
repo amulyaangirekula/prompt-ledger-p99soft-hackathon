@@ -144,6 +144,15 @@ const CATEGORIES: ToolCategory[] = [
         ],
       },
       {
+        name: "send_group_invite",
+        description: "Generate an invite code and send it via email to one or more people. Accepts a single email or comma-separated list.",
+        examples: [
+          { prompt: "Invite john@example.com to join Goa Trip group" },
+          { prompt: "Send invite to alice@gmail.com and bob@gmail.com for group xyz" },
+          { prompt: "Email an invite to my friend at test@example.com for Goa Trip" },
+        ],
+      },
+      {
         name: "redeem_group_invite",
         description: "Join a group using an invite code.",
         examples: [

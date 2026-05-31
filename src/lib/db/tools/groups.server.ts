@@ -4,7 +4,7 @@
  */
 
 import { z } from "zod";
-import { getClientForApiKey, getAnonClient } from "../supabase.server";
+import { getClientForApiKey, getAnonClient, getServiceClient } from "../supabase.server";
 import { jwtSubject, jwtPayload } from "../jwt.server";
 import { withPendingHint, toolError } from "../pending-hint.server";
 
@@ -74,13 +74,19 @@ export async function listMyGroups(apiKey: string): Promise<ToolResponse> {
     const gids = (memberships ?? []).map((r) => r.group_id as string);
     if (gids.length === 0) return withPendingHint([], ac) as ToolResponse;
 
+    const roleMap: Record<string, string> = {};
+    for (const m of memberships ?? []) roleMap[m.group_id as string] = m.role as string;
+
     const { data: groups, error: grpErr } = await ac.client
       .from("groups")
       .select("id,name,kind,created_at,settings")
       .in("id", gids);
 
     if (grpErr) return { result: toolError(`list_my_groups: ${grpErr.message}`) };
-    return withPendingHint(groups ?? [], ac) as ToolResponse;
+
+    // Attach the current user's role to each group
+    const enriched = (groups ?? []).map((g) => ({ ...g, role: roleMap[g.id as string] ?? "member" }));
+    return withPendingHint(enriched, ac) as ToolResponse;
   } catch (e) {
     return { result: toolError(`list_my_groups: ${String(e)}`) };
   }
@@ -381,7 +387,32 @@ export async function listGroupMembers(
       .select("user_id,role,joined_at")
       .eq("group_id", parsed.data.group_id);
     if (error) return { result: toolError(`list_group_members: ${error.message}`) };
-    return withPendingHint(data ?? [], ac) as ToolResponse;
+
+    const members = data ?? [];
+    const userIds = members.map((m) => m.user_id as string).filter(Boolean);
+    let emailMap: Record<string, string> = {};
+
+    // Try service client to get emails from auth.users
+    const svc = getServiceClient();
+    if (svc && userIds.length > 0) {
+      try {
+        const { data: { users } } = await svc.auth.admin.listUsers({ perPage: 1000 });
+        for (const u of users ?? []) {
+          if (userIds.includes(u.id) && u.email) emailMap[u.id] = u.email;
+        }
+      } catch { /* service key not available, skip */ }
+    }
+
+    const enriched = members.map((m) => {
+      const email = emailMap[m.user_id as string] ?? null;
+      return {
+        ...m,
+        email,
+        display_name: email ? email.split("@")[0] : null,
+      };
+    });
+
+    return withPendingHint(enriched, ac) as ToolResponse;
   } catch (e) {
     return { result: toolError(`list_group_members: ${String(e)}`) };
   }

@@ -24,6 +24,14 @@ function getConfig(): { url: string; anonKey: string } {
   return { url, anonKey };
 }
 
+/** Service-role client — only for server-side admin queries (e.g. auth.users). */
+export function getServiceClient(): SupabaseClient | null {
+  const url = process.env.SUPABASE_URL ?? "";
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!url || !serviceKey) return null;
+  return createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
 // ---------------------------------------------------------------------------
 // Value objects
 // ---------------------------------------------------------------------------
