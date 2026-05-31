@@ -7,22 +7,11 @@ import { useServerFn } from "@tanstack/react-start";
 import { mcpCall } from "@/lib/mcp/mcp.functions";
 import { IndianRupee, Save, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { getBudgetSettings, saveBudgetSettings } from "@/lib/budget-settings";
 
 export const Route = createFileRoute("/settings")({
   component: () => <AppShell><SettingsPage /></AppShell>,
 });
-
-// localStorage keys scoped per user email so each user has their own settings
-const lsKey = (email: string, field: string) => `pl.${email}.${field}`;
-
-export function getBudgetSettings(email?: string) {
-  if (typeof window === "undefined") return { salary: 50000, limit: 5000 };
-  const u = email ?? getLocalUser()?.email ?? "";
-  return {
-    salary: Number(localStorage.getItem(lsKey(u, "salary")) ?? 50000),
-    limit:  Number(localStorage.getItem(lsKey(u, "limit"))  ?? 5000),
-  };
-}
 
 function fmtINR(n: number) {
   return "₹" + Math.round(n).toLocaleString("en-IN");
@@ -78,9 +67,7 @@ function SettingsPage() {
   const savings    = Math.max(0, salary - limit);
 
   const save = () => {
-    localStorage.setItem(lsKey(email, "salary"), String(salary));
-    localStorage.setItem(lsKey(email, "limit"),  String(limit));
-    window.dispatchEvent(new Event("budget-settings-changed"));
+    saveBudgetSettings(email, salary, limit);
     toast.success("Settings saved");
   };
 

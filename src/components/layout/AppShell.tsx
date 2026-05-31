@@ -9,7 +9,7 @@ import { clearLocalUser, getLocalUser, type LocalUser } from "@/lib/api-key";
 import { useQuery } from "@tanstack/react-query";
 import { mcpCall } from "@/lib/mcp/mcp.functions";
 import { useServerFn } from "@tanstack/react-start";
-import { getBudgetSettings } from "@/routes/settings";
+import { getBudgetSettings } from "@/lib/budget-settings";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: Home },
@@ -27,16 +27,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const loc = useLocation();
   const [user, setUser] = useState<LocalUser | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [dark, setDark] = useState(() => {
-    // Persist theme across navigation and page reloads
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("theme");
       if (saved) return saved === "dark";
     }
-    return true; // default dark
+    return true;
   });
-  const [budgetLimit, setBudgetLimit]   = useState(0);
-  const [budgetSalary, setBudgetSalary] = useState(0);
+  const [budgetLimit, setBudgetLimit] = useState(0);
 
   useEffect(() => {
     const u = getLocalUser();
@@ -47,17 +46,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setUser(u);
   }, [navigate]);
 
-  // load budget settings from localStorage (and re-load when settings are saved)
+  // load budget settings — re-run when user is set or settings are saved
   useEffect(() => {
     const load = () => {
-      const s = getBudgetSettings();
-      setBudgetLimit(s.limit);
-      setBudgetSalary(s.salary);
+      const email = getLocalUser()?.email ?? "";
+      setBudgetLimit(getBudgetSettings(email).limit);
     };
     load();
     window.addEventListener("budget-settings-changed", load);
     return () => window.removeEventListener("budget-settings-changed", load);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("light", !dark);
@@ -66,6 +64,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [dark]);
 
   const callTool = useServerFn(mcpCall);
+
+  // It detects for any session expiry happens in application and add a banner as sign in again
+  const checkExpiry = (msg: string) => {
+    if (msg.toLowerCase().includes("session expired") || msg.toLowerCase().includes("login_get_api_key")) {
+      setSessionExpired(true);
+    }
+  };
+
   const approvals = useQuery({
     queryKey: ["approvals-count", user?.apiKey],
     enabled: !!user?.apiKey,
@@ -73,7 +79,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     queryFn: async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const r = await callTool({ data: { apiKey: user!.apiKey, name: "list_my_pending_approvals", args: {} } }) as any;
-      if (!r.ok) return 0;
+      if (!r.ok) { checkExpiry(r.error ?? ""); return 0; }
       const data = r.data as unknown;
       const list = Array.isArray((data as { pending?: unknown[] })?.pending)
         ? (data as { pending: unknown[] }).pending
@@ -246,7 +252,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </button>
         </header>
-        <div className="p-6 flex-1 min-w-0">{children}</div>
+        <div className="p-6 flex-1 min-w-0">
+          {/* Session expired banner */}
+          {sessionExpired && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl bg-destructive/15 border border-destructive/40 px-4 py-3">
+              <div className="text-sm text-destructive font-medium">
+                ⚠ Your session has expired. Please sign in again to reload your data.
+              </div>
+              <button
+                onClick={() => { clearLocalUser(); navigate({ to: "/login" }); }}
+                className="shrink-0 h-8 px-3 rounded-lg bg-destructive text-destructive-foreground text-xs font-medium hover:opacity-90"
+              >
+                Sign in again
+              </button>
+            </div>
+          )}
+          {children}
+        </div>
       </main>
     </div>
   );

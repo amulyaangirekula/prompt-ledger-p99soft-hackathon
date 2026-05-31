@@ -10,7 +10,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, BarChart, Bar, Cell,
 } from "recharts";
-import { getBudgetSettings } from "@/routes/settings";
+import { getBudgetSettings } from "@/lib/budget-settings";
 
 export const Route = createFileRoute("/reports")({
   component: () => <AppShell><ReportsPage /></AppShell>,
@@ -46,8 +46,7 @@ function ReportsPage() {
   useEffect(() => {
     const u = getLocalUser();
     if (u?.apiKey) setApiKey(u.apiKey);
-    // load spending limit from settings page localStorage
-    const load = () => setBudgetLimit(getBudgetSettings().limit);
+    const load = () => setBudgetLimit(getBudgetSettings(getLocalUser()?.email ?? "").limit);
     load();
     window.addEventListener("budget-settings-changed", load);
     return () => window.removeEventListener("budget-settings-changed", load);
@@ -636,11 +635,16 @@ function SvgDonut({ segs, total }: { segs: { category: string; total: number; co
     return `M ${p1.x} ${p1.y} A ${R} ${R} 0 ${lg} 1 ${p2.x} ${p2.y} L ${p3.x} ${p3.y} A ${ir} ${ir} 0 ${lg} 0 ${p4.x} ${p4.y} Z`;
   }
   return (
-    <svg width={180} height={180} viewBox="0 0 180 180">
-      {segs.map((s) => <path key={s.category} d={arc(s.start, s.end)} fill={s.color} opacity={0.9} />)}
-      <circle cx={cx} cy={cy} r={ir - 2} fill="hsl(var(--card))" />
-      <text x={cx} y={cy - 6} textAnchor="middle" fontSize={13} fontWeight="700" fill="hsl(var(--foreground))">{fmtShort(total)}</text>
-      <text x={cx} y={cy + 10} textAnchor="middle" fontSize={9} fill="hsl(var(--muted-foreground))">Total</text>
-    </svg>
+    <div className="relative" style={{ width: 180, height: 180 }}>
+      <svg width={180} height={180} viewBox="0 0 180 180">
+        {segs.map((s) => <path key={s.category} d={arc(s.start, s.end)} fill={s.color} opacity={0.9} />)}
+        <circle cx={cx} cy={cy} r={ir - 2} fill="transparent" />
+      </svg>
+      {/* Center label — HTML so CSS variables resolve correctly */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        <span className="text-sm font-bold leading-tight">{fmtShort(total)}</span>
+        <span className="text-[10px] text-muted-foreground mt-0.5">Total</span>
+      </div>
+    </div>
   );
 }
