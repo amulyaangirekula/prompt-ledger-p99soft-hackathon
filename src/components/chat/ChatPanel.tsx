@@ -192,7 +192,7 @@ function ToolsPopover(_props: { onSelectTool: (name: string) => void }) {
                             {tool.name}
                           </code>
                           <span className="text-[11px] text-muted-foreground group-hover:text-foreground transition-colors leading-relaxed">
-                            — {tool.desc}
+                           {tool.desc}
                           </span>
                         </button>
                       ))}
