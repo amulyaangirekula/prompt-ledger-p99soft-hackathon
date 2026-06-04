@@ -396,7 +396,8 @@ export async function listGroupMembers(
     const svc = getServiceClient();
     if (svc && userIds.length > 0) {
       try {
-        const { data: { users } } = await svc.auth.admin.listUsers({ perPage: 1000 });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: { users } } = await (svc.auth as any).admin.listUsers({ perPage: 1000 });
         for (const u of users ?? []) {
           if (userIds.includes(u.id) && u.email) emailMap[u.id] = u.email;
         }
