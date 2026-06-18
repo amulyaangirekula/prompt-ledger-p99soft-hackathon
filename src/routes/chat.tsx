@@ -5,7 +5,7 @@ import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { getLocalUser } from "@/lib/api-key";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listUserThreads, createNewThread, deleteThreadById, getThreadById } from "@/lib/db/thread-functions.server";
+import { listUserThreads, createNewThread, deleteThreadById, getThreadById } from "../lib/db/thread-functions";
 import {
   Sparkles, MessageSquarePlus, Brain,
   Receipt, Split, PiggyBank,
@@ -73,6 +73,12 @@ function ChatPage() {
     queryFn: () => listThreadsFn({ data: { apiKey } }),
     staleTime: 30_000,
   });
+
+  useEffect(() => {
+    if (threadsQ.error) {
+      console.error("threadsQ query error:", threadsQ.error);
+    }
+  }, [threadsQ.error]);
 
   // ---- Create new thread --------------------------------------------------
   const createMut = useMutation({

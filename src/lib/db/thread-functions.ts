@@ -37,9 +37,14 @@ const apiKeyInput = z.object({ apiKey: z.string().min(1) });
 export const listUserThreads = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) => z.object({ apiKey: z.string().min(1) }).parse(d))
   .handler(async ({ data }): Promise<ThreadSummary[]> => {
-    const userId = await getUserId(data.apiKey);
-    await ensureIndexes();
-    return listThreads(userId);
+    try {
+      const userId = await getUserId(data.apiKey);
+      await ensureIndexes();
+      return await listThreads(userId);
+    } catch (error) {
+      console.error("Error in listUserThreads server function:", error);
+      throw error;
+    }
   });
 
 /** Get a single thread with all messages. */
@@ -48,18 +53,28 @@ export const getThreadById = createServerFn({ method: "GET" })
     z.object({ apiKey: z.string().min(1), threadId: z.string().min(1) }).parse(d),
   )
   .handler(async ({ data }): Promise<Thread | null> => {
-    const userId = await getUserId(data.apiKey);
-    return getThread(data.threadId, userId);
+    try {
+      const userId = await getUserId(data.apiKey);
+      return await getThread(data.threadId, userId);
+    } catch (error) {
+      console.error("Error in getThreadById server function:", error);
+      throw error;
+    }
   });
 
 /** Create a new thread. Returns the new threadId. */
 export const createNewThread = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => apiKeyInput.parse(d))
   .handler(async ({ data }): Promise<{ threadId: string }> => {
-    const userId = await getUserId(data.apiKey);
-    await ensureIndexes();
-    const threadId = await createThread(userId);
-    return { threadId };
+    try {
+      const userId = await getUserId(data.apiKey);
+      await ensureIndexes();
+      const threadId = await createThread(userId);
+      return { threadId };
+    } catch (error) {
+      console.error("Error in createNewThread server function:", error);
+      throw error;
+    }
   });
 
 /** Delete a thread. */
@@ -68,7 +83,12 @@ export const deleteThreadById = createServerFn({ method: "POST" })
     z.object({ apiKey: z.string().min(1), threadId: z.string().min(1) }).parse(d),
   )
   .handler(async ({ data }): Promise<{ ok: boolean }> => {
-    const userId = await getUserId(data.apiKey);
-    await deleteThread(data.threadId, userId);
-    return { ok: true };
+    try {
+      const userId = await getUserId(data.apiKey);
+      await deleteThread(data.threadId, userId);
+      return { ok: true };
+    } catch (error) {
+      console.error("Error in deleteThreadById server function:", error);
+      throw error;
+    }
   });
