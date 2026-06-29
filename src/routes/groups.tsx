@@ -889,7 +889,7 @@ function GroupsPage() {
 
               {/* Invite members */}
               <div>
-                <label className="text-sm font-medium block mb-1.5">Invite Members (optional)</label>
+                <label className="text-sm font-medium block mb-1.5">Invite Members</label>
                 <div className="min-h-10 px-3 py-2 rounded-xl bg-input border border-border flex flex-wrap gap-1.5 focus-within:ring-1 focus-within:ring-ring">
                   {inviteEmails.split(",").filter(Boolean).map((email, i) => (
                     <span key={i} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 text-primary text-xs">
