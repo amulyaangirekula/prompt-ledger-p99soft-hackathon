@@ -2,7 +2,7 @@
 
 **AI-powered personal & group expense tracker with streaming chat and MCP tools.**
 
-PromptLedger lets you manage expenses, split group costs, track budgets, and get AI-driven financial insights — all through natural language.
+PromptLedger lets you manage your expenses, split group costs, track budgets, and get AI-driven financial insights — all through natural language.
 
 ---
 
